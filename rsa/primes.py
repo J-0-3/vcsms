@@ -13,7 +13,7 @@ def sieve_of_eratosthenes(maximum: int):
     return [x+2 for x in filter(lambda i: primes[i] == 0, range(len(primes)))]
 
 # def miller_rabin_primality_test(x: int):
-
+    
 
 def is_prime(x: int):
     prime = True

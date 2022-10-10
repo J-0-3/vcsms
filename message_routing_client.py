@@ -3,6 +3,7 @@ from queue import Queue
 import socket
 import sys
 
+
 def recv_thread(sock, message_queue, request_queue, stopped):
     while not stopped():
         data = sock.recv(2048)
@@ -19,16 +20,17 @@ def message_process_thread(message_queue, stopped):
                 print(f"\rNEW MESSAGE: \n{message[1]}\n\nFROM: {message[0]}")
 
 
-def send_thread(sock, request_queue):
+def send_thread(sock, request_queue, send_queue):
     while True:
-        receiver = input()
+        message = send_queue.get()
+        receiver = message[0]
+        data = message[1]
         if receiver == "QUIT":
             sock.send(b'QUIT')
             break
         sock.send(b'TO'+receiver.encode())
         if request_queue.get() == b'data': # queue.get() blocks until a piece of data is available
-            message = input("Msg: ")
-            sock.send(message.encode())
+            sock.send(data.encode())
             if request_queue.get() == b'OK':
                 print("Message Sent Successfully")
             else:
@@ -37,40 +39,63 @@ def send_thread(sock, request_queue):
         else:    
             print(f"server rejected message request to {receiver}")
 
+class Messenger:
+    def __init__(self):
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.msg_queue = Queue()
+        self.send_queue = Queue()
+        self.req_queue = Queue()
+        self.stopped = False
+
+    def connect(self, ip:str, port:int, username:str):
+        self.s.connect((ip, port))
+        self.s.send(name.encode())
+        status = self.s.recv(1024)
+        if status != b'OK':
+            self.s.close()
+            return status
+        
+        self.t_send = Thread(
+                target=send_thread,
+                args=(self.s, self.req_queue, self.send_queue)
+        )
+        self.t_msg = Thread(
+                target=message_process_thread,
+                args=(self.msg_queue, lambda: self.stopped)
+        )
+        self.t_recv = Thread(
+                target=recv_thread,
+                args=(self.s, self.msg_queue, self.req_queue, lambda:self.stopped)
+        )
+        self.t_send.start()
+        self.t_msg.start()
+        self.t_recv.start()
+    
+    def exit(self):
+        self.send_queue.put(("QUIT", None))
+        self.t_send.join()
+        self.stopped = True
+        self.t_msg.join()
+        self.t_recv.join()
+        self.s.close()
+
+    def send(self, to: str, message: str):
+        self.send_queue.put((to, message))
+
+    def read(self, block=True):
+    
+        if not self.msg_queue.empty() or block:
+            return self.msg_queue.get()
+        else:
+            return (None, None)
+
 if __name__ == "__main__":
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(("127.0.0.1", int(sys.argv[1])))
-    name = input("What is your name? ")
-    s.send(name.encode())
-    if s.recv(1024) != b'OK':
-        print("could not authenticate to server")
-        s.close()
-        exit()
-   
+    name = input("What is your name?")
+
     print("Type a user's name and press enter to send them a message! Type QUIT to quit!")
-    msg_queue = Queue()
-    req_queue = Queue()
-    stopped = False
-
-    t_send = Thread(
-            target=send_thread,
-            args=(s, req_queue)
-    )
-    t_msg = Thread(
-            target=message_process_thread,
-            args=(msg_queue, lambda: stopped)
-    )
-    t_recv = Thread(
-            target=recv_thread,
-            args=(s, msg_queue, req_queue, lambda: stopped)
-    )
-    t_send.start()
-    t_recv.start()
-    t_msg.start()
-
-    t_send.join()
-    stopped = True
-    t_msg.join()
-    t_recv.join()
-    s.close()
-
+    messenger = Messenger()
+    messenger.connect("127.0.0.1", int(sys.argv[1]), name)
+    messenger.send("bob", "hello bob!")
+    message = messenger.read()
+    print(f"NEW MESSAGE: \n{message[1]}\n FROM {message[0]}")
+    messenger.exit()
