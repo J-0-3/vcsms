@@ -1,8 +1,12 @@
 import socket
 import threading
 import random
-from cryptographylib import rsa, sha256, dhke, utils, aes256
+import json
+from cryptographylib import sha256, dhke, utils, aes256
 import signing
+import keys
+import sys
+import http.server
 
 dhke_group = dhke.group16_4096
 address = ("0.0.0.0", 6000)
@@ -40,14 +44,30 @@ def accept_client(client: socket.socket, pub_key: tuple, priv_key: tuple):
     print(f"RECEIVED: {message}")
     
 if __name__ == "__main__":
-    pub, priv = rsa.gen_keypair()
+    if len(sys.argv) > 3 and sys.argv[3] == '-g':
+        print("generating keypair")
+        keys.generate_keys("server.pub", "server.priv")
     
+    pub, priv = keys.load_keys("server.pub", "server.priv")
+               
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
+    if len(sys.argv) > 1:
+        address = (address[0], int(sys.argv[1]))
+    if len(sys.argv) > 2:
+        address = (sys.argv[2], address[1]) 
+        
+    with open("server.conf", 'w') as f:
+        f.write(json.dumps({
+            "ip": address[0],
+            "port": address[1],
+            "fingerprint": hex(keys.fingerprint(pub))[2:]
+        })) 
     s.bind(address)
     s.listen()
     print("LISTENING")
+    
     while True:
         conn, addr = s.accept()
         t_accept = threading.Thread(target=accept_client, 

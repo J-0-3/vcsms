@@ -1,18 +1,19 @@
-import socket
-import random
+import socket, random, sys, json
 from cryptographylib import rsa, sha256, dhke, utils, aes256
 import signing
-server = ("127.0.0.1", 4000)
 dhke_group = dhke.group16_4096
 
-def handshake(server: socket.socket, pub_key: tuple, priv_key: tuple):
+def handshake(server: socket.socket, pub_key: tuple, priv_key: tuple, fingerprint:str):
     pub_exp = hex(pub_key[0])[2:].encode()
     pub_mod = hex(pub_key[1])[2:].encode()
     
     server_exp, server_mod = server.recv(2048).split(b':')
     server_pub = (int(server_exp, 16), int(server_mod, 16))
-    
-    pub_key_hash = hex(sha256.hash(pub_exp + pub_mod))[2:].encode()
+    # if hex(sha256.hash(server_exp + server_mod))[2:] != fingerprint:
+    #     print("server fingerprint mismatch. possible mitm detected, aborting...")
+    #     server.close()
+    #     return
+    pub_key_hash = hex(sha256.hash(pub_exp + pub_mod)).encode()
     server.send(pub_key_hash+b":"+pub_exp+b":"+pub_mod)
     print("exchanged public keys...")
     dhke_priv = random.randrange(1, dhke_group[1])
@@ -38,9 +39,19 @@ def handshake(server: socket.socket, pub_key: tuple, priv_key: tuple):
     server.send(encrypted_message)
     
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        with open(sys.argv[1], 'r') as f:
+            config = json.loads(f.read())
+    else:
+        try:
+            with open("server.conf", 'r') as f:
+                config = json.loads(f.read())
+        except FileNotFoundError:
+            print("No config file specified or found")    
+    server = (config["ip"], config["port"])
     print("generating rsa key...")
     pub, priv = rsa.gen_keypair(2048)
     print("done. connecting to server...")
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect(server)
-    handshake(s, pub, priv)
+    handshake(s, pub, priv, config["fingerprint"])

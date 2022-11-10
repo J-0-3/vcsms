@@ -5,3 +5,4 @@ __pycache__
 *.sig
 *.enc
 *.key
+server.conf
