@@ -7,7 +7,8 @@ import keys
 import signing
 from cryptographylib import dhke, sha256, utils, aes256
 
-class serverConnection:
+
+class ServerConnection:
     def __init__(self, ip: str, port: int, fp: str):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -78,7 +79,14 @@ class serverConnection:
     
     def read(self) -> bytes:
         return self.in_queue.get()
-    
+
+    def peek(self) -> bytes:
+        cur = self.readall()
+        first = cur[0]
+        for c in cur:
+            self.in_queue.put(c)
+        return first
+
     def readall(self) -> list:
         msgs = []
         while not self.in_queue.empty():

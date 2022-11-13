@@ -1,5 +1,4 @@
 import socket
-import sqlite3
 import random
 from queue import Queue
 import json 
@@ -10,6 +9,7 @@ from cryptographylib import dhke, sha256, aes256, utils
 
 port = 6000
 interface = "0.0.0.0"
+
 
 class Server:
     def __init__(self, addr: str, port: int, keypair: tuple):
@@ -123,4 +123,4 @@ if __name__ == "__main__":
             "fingerprint": hex(keys.fingerprint(keypair[0]))[2:]
         }))
     server = Server("0.0.0.0", 6000, keypair)
-    server.run() 
+    server.run()
