@@ -1,4 +1,5 @@
 import socket
+import sqlite3
 import random
 from queue import Queue
 import json 
@@ -6,6 +7,7 @@ import threading
 import keys
 import signing
 from cryptographylib import dhke, sha256, aes256, utils
+
 port = 6000
 interface = "0.0.0.0"
 
@@ -18,10 +20,12 @@ class Server:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.encryption_keys = {}
+        self.client_ids = {}
         self.dhke_group = dhke.group16_4096
         self.in_queue = Queue()
         self.out_queue = Queue()
         self.client_in_queues = {}
+        
         
         
     def handshake(self, client: socket.socket):
@@ -50,8 +54,9 @@ class Server:
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(c_dhke_pub, 16), self.dhke_group)
     
-        self.encryption_keys[client] = sha256.hash(utils.i_to_b(shared_key))
+        self.encryption_keys[c_id.decode()] = sha256.hash(utils.i_to_b(shared_key))
         self.client_in_queues[client] = Queue()
+        self.client_ids[client] = c_id.decode()
         
         gateway_thread = threading.Thread(target=self.in_thread, args=(client, ), daemon=True)
         gateway_thread.start()
@@ -83,7 +88,6 @@ class Server:
             client = message["from"]
             data = message["data"]
             self.client_in_queues[client].put(data)
-            print(f"MESSAGE: {data.decode()}")      
                 
     def connect(self, client: socket.socket):
         self.handshake(client)
@@ -108,7 +112,7 @@ class Server:
         t_out.start()
         t_accept = threading.Thread(target=self.accept_thread, args=())
         t_accept.start()
-        
+
             
 if __name__ == "__main__":
     keypair = keys.load_keys("server.pub", "server.priv")
