@@ -9,6 +9,7 @@ def get_msb(x: int) -> int:
     Returns:
         int: The index (0 -> log x) of the most significant bit 
     """
+    return x.bit_length() - 1
     cur = x
     msb = 0
     while cur != 0:

@@ -18,6 +18,7 @@ s_box = [[0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b
         [0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf],
         [0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16]]
 
+
 def invert_sbox(s_box: list) -> list:
     """Invert a given substitution box such that looking up an element gives the index
     of that element in the original s box.
@@ -136,11 +137,14 @@ def gf_mod_bytes(b: int, mod: int) -> int:
     Returns:
         int: The remainder (modulus)
     """
-    while get_msb(b) >= get_msb(mod):
-        shifted_mod = mod << get_msb(b) - get_msb(mod)
+    b_msb = get_msb(b)
+    mod_msb = get_msb(mod)
+    while b_msb >= mod_msb:
+        shifted_mod = mod << (b_msb - mod_msb)
         b ^= shifted_mod
+        b_msb = get_msb(b)
+        mod_msb = get_msb(mod)
     return b
-
 
 def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
     """Calculate the product of two galois field polynomials represented as bytes
@@ -160,10 +164,15 @@ def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
     y_coefficients = byte_to_bits(y)
     z = 0
     for i in range(8):
-        z ^= x * 2 ** i * y_coefficients[7 - i]
+        z ^= x * (2 ** i) * y_coefficients[7 - i]
     return gf_mod_bytes(z, modulus)
 
-
+multiply_lookup = []
+for i in range(256):
+    row = []
+    for j in range(256):
+        row.append(gf_multiply_bytes(i, j))
+    multiply_lookup.append(row)
 def transpose_matrix(m: list) -> list:
     """Transpose a column/row major 4x4 matrix to row/column major. 
 
@@ -266,7 +275,7 @@ def mix_columns(state: list, inverse: bool = False) -> list:
         for i in range(4):
             val = 0
             for j in range(4):
-                val ^= gf_multiply_bytes(columns[c][j], multiplication_matrix[i][j])  # matrix vector multiplication but with weird GF arithmetic
+                val ^= multiply_lookup[columns[c][j]][multiplication_matrix[i][j]]  # matrix vector multiplication but with weird GF arithmetic
             col[i] = val
         mixed_columns.append(col)
 
