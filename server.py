@@ -1,6 +1,7 @@
 import socket
 import random
 from queue import Queue
+from server_db import Server_DB
 import json
 import threading
 import keys
@@ -20,12 +21,12 @@ class Server:
         self.priv = keypair[1]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
         self.dhke_group = dhke.group14_2048
         self.in_queue = Queue()
         self.out_queue = Queue()
         self.client_outboxes = {}
-        self.client_pubkeys = {}
+        self.db_connection = Server_DB()
+
 
     def handshake(self, client: socket.socket):
         pub_exp = hex(self.pub[0])[2:].encode()
@@ -40,6 +41,10 @@ class Server:
             client.send(b"PUBLIC KEY VALIDATION FAILED")
             client.close()
             return
+
+        db = Server_DB()
+        db.user_login(c_id.decode(), client_pubkey)
+        db.close()
 
         dhke_priv = random.randrange(1, self.dhke_group[1])
         dhke_pub = hex(dhke.generate_public_key(dhke_priv, self.dhke_group))[2:].encode()
@@ -58,12 +63,11 @@ class Server:
         encryption_key = sha256.hash(utils.i_to_b(shared_key))
         outbox = Queue()
         self.client_outboxes[c_id.decode()] = outbox
-        self.client_pubkeys[c_id.decode()] = client_pubkey
         t_in = threading.Thread(target=self.__in_thread, args=(client, encryption_key, c_id.decode()))
         t_out = threading.Thread(target=self.__out_thread, args=(client, outbox, encryption_key))
         t_in.start()
         t_out.start()
-        return c_id.decode()
+
 
     def __in_thread(self, client: socket.socket, encryption_key: int, id: str):
         while True:
@@ -79,11 +83,15 @@ class Server:
             if recipient == b'0':
                 request = msg.split(b':')
                 if request[0] == b'GetKey':
-                    print(f"key request for {request[1].decode()}")
-                    if request[1].decode() in self.client_pubkeys:
+                    req_id = request[1].decode()
+                    print(f"key request for {req_id}")
+                    db = Server_DB()
+
+                    if db.user_known(req_id):
                         print("Found")
-                        key = self.client_pubkeys[request[1].decode()]
-                        self.client_outboxes[id].put(b'0:KeyFound:' + request[1] + b':' + hex(key[0]).encode() + b':' + hex(key[1]).encode())
+                        key = db.get_pubkey(req_id)
+                        self.client_outboxes[id].put(b'0:KeyFound:' + req_id.encode() + b':' + hex(key[0]).encode() + b':' + hex(key[1]).encode())
+                        db.close()
                         continue
                     else:
                         print("Not Found")
@@ -116,7 +124,7 @@ class Server:
     def run(self):
         self.sock.bind((self.addr, self.port))
         self.sock.listen(30)
-
+        self.db_connection.setup_db()
         t_accept = threading.Thread(target=self.accept_thread, args=())
         t_accept.start()
 

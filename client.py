@@ -129,7 +129,7 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3:
         keypath = sys.argv[1], sys.argv[2]
     try:
-        pub, priv = keys.load_keys(*keypath)
+        pub, priv = keys.load_key(keypath[0]), keys.load_key(keypath[1])
     except FileNotFoundError:
         pub, priv = keys.generate_keys(*keypath)
 
