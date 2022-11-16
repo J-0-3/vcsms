@@ -42,7 +42,8 @@ class Server_DB:
         values = cursor.fetchone()
         if values is None:
             raise Exception("User not found")
-        key = values
+        path = values[0]
+        key = keys.load_key(path)
         return key
 
     def close(self):

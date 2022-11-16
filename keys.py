@@ -3,7 +3,7 @@ import signing
 
 
 def write_key(key: tuple, out: str):
-    with open(out, 'r') as f:
+    with open(out, 'w') as f:
         f.write(f"{hex(key[0])[2:]}:{hex(key[1])[2:]}")
 def generate_keys(pub_out, priv_out):
     pub, priv = rsa.gen_keypair(2048)

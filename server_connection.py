@@ -19,6 +19,7 @@ class ServerConnection:
         self.public_key = (0, 0)
         self.in_queue = Queue()
         self.out_queue = Queue()
+        self.connected = False
 
 
     def __handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
@@ -50,7 +51,9 @@ class ServerConnection:
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self.encryption_key = sha256.hash(utils.i_to_b(shared_key))
         print(f"Encryption Key: {self.encryption_key}")
+        
     def connect(self, pub_key, priv_key, skip_fp_verify: bool = False):
+        self.connected = True
         self.socket.connect((self.ip, self.port))
         self.__handshake(pub_key, priv_key, dhke.group14_2048, skip_fp_verify)
         t_in = threading.Thread(target=self.__in_thread, args=())
@@ -59,24 +62,30 @@ class ServerConnection:
         t_out.start()
 
     def __in_thread(self):
-        while True:
+        while True:        
             data = self.socket.recv(8192)
-            if data == b'':
-                continue
+            if data == b'CLOSE':
+                self.connected = False
+                self.socket.close()
+                break
             iv, data = data.split(b':')
             iv = int(iv, 16)
             message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self.encryption_key, iv)
             self.in_queue.put(message)
-
+    
     def __out_thread(self):
-        while True:
-            message = self.out_queue.get()
-            iv = random.randrange(1, 2 ** 128)
-            encrypted = aes256.encrypt_cbc(message, self.encryption_key, iv)
-            self.socket.send(hex(iv)[2:].encode() + b':' + hex(int.from_bytes(encrypted, 'big'))[2:].encode())
+        while self.connected:
+            if not self.out_queue.empty():
+                message = self.out_queue.get()
+                iv = random.randrange(1, 2 ** 128)
+                encrypted = aes256.encrypt_cbc(message, self.encryption_key, iv)
+                self.socket.send(hex(iv)[2:].encode() + b':' + hex(int.from_bytes(encrypted, 'big'))[2:].encode())
 
     def send(self, data: bytes):
         self.out_queue.put(data)
-
+        
     def read(self) -> bytes:
         return self.in_queue.get()
+    
+    def new_msg(self) -> bool:
+        return not self.in_queue.empty()

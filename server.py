@@ -14,7 +14,7 @@ interface = "0.0.0.0"
 
 
 class Server:
-    def __init__(self, addr: str, port: int, keypair: tuple):
+    def __init__(self, addr: str, port: int, keypair: tuple, db_path: str, pubkey_directory: str):
         self.addr = addr
         self.port = port
         self.pub = keypair[0]
@@ -25,7 +25,8 @@ class Server:
         self.in_queue = Queue()
         self.out_queue = Queue()
         self.client_outboxes = {}
-        self.db_connection = Server_DB()
+        self.db_path = db_path
+        self.pubkey_path = pubkey_directory
 
 
     def handshake(self, client: socket.socket):
@@ -42,10 +43,10 @@ class Server:
             client.close()
             return
 
-        db = Server_DB()
+        db = self.db_connect()
         db.user_login(c_id.decode(), client_pubkey)
         db.close()
-
+        
         dhke_priv = random.randrange(1, self.dhke_group[1])
         dhke_pub = hex(dhke.generate_public_key(dhke_priv, self.dhke_group))[2:].encode()
         dhke_pub_sig = signing.sign(dhke_pub, self.priv)
@@ -63,8 +64,8 @@ class Server:
         encryption_key = sha256.hash(utils.i_to_b(shared_key))
         outbox = Queue()
         self.client_outboxes[c_id.decode()] = outbox
-        t_in = threading.Thread(target=self.__in_thread, args=(client, encryption_key, c_id.decode()))
-        t_out = threading.Thread(target=self.__out_thread, args=(client, outbox, encryption_key))
+        t_in = threading.Thread(target=self.__in_thread, args=(client, encryption_key, c_id.decode()), daemon=True)
+        t_out = threading.Thread(target=self.__out_thread, args=(client, outbox, encryption_key), daemon=True)
         t_in.start()
         t_out.start()
 
@@ -72,8 +73,6 @@ class Server:
     def __in_thread(self, client: socket.socket, encryption_key: int, id: str):
         while True:
             dat = client.recv(4096)
-            if dat == b'':
-                continue
             iv, data = dat.split(b':', 1)
             iv = int(iv, 16)
             data = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), encryption_key, iv)
@@ -85,8 +84,7 @@ class Server:
                 if request[0] == b'GetKey':
                     req_id = request[1].decode()
                     print(f"key request for {req_id}")
-                    db = Server_DB()
-
+                    db = self.db_connect()
                     if db.user_known(req_id):
                         print("Found")
                         key = db.get_pubkey(req_id)
@@ -97,6 +95,12 @@ class Server:
                         print("Not Found")
                         self.client_outboxes[id].put(b'0:KeyNotFound:' + request[1])
                         continue
+                elif request[0] == b'QUIT':
+                    db = self.db_connect()
+                    db.user_logout(id)
+                    db.close()
+                    self.client_outboxes[id].put(b'CLOSE')
+                    break
             outgoing_msg = id.encode() + b':' + msg
             self.client_outboxes[recipient.decode()].put(outgoing_msg)
             print(f"Message to {recipient} from {id}")
@@ -104,42 +108,48 @@ class Server:
     def __out_thread(self, sock: socket.socket, outbox: Queue, encryption_key: int):
         while True:
             message = outbox.get()
+            if message == b'CLOSE':
+                sock.send(b'CLOSE')
+                print("closing")
+                break
             aes_iv = random.randrange(1, 2**128)
             encrypted_message = hex(int.from_bytes(aes256.encrypt_cbc(message, encryption_key, aes_iv), 'big')).encode()
             sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
-
+        sock.close()
     def connect(self, client: socket.socket):
         self.handshake(client)
 
     def send(self, client: str, message: bytes):
         self.client_outboxes[client].put(message)
 
-    def accept_thread(self):
-        while True:
-            conn, addr = self.sock.accept()
-            print(f"New connection from: {addr}")
-            t_connect = threading.Thread(target=self.connect, args=(conn,))
-            t_connect.start()
-
     def run(self):
         self.sock.bind((self.addr, self.port))
         self.sock.listen(30)
-        self.db_connection.setup_db()
-        t_accept = threading.Thread(target=self.accept_thread, args=())
-        t_accept.start()
+        db = self.db_connect()
+        db.setup_db()
+        db.close()
+        
+        while True:
+            conn, addr = self.sock.accept()
+            print(f"New connection from: {addr}")
+            t_connect = threading.Thread(target=self.connect, args=(conn,), daemon=True)
+            t_connect.start()
 
-
+    def db_connect(self):
+        db = Server_DB(self.db_path, self.pubkey_path)
+        return db
+    
 if __name__ == "__main__":
     try:
-        keypair = keys.load_keys("server.pub", "server.priv")
+        keypair = keys.load_key("server.pub"), keys.load_key("server.priv")
     except FileNotFoundError:
         keypair = keys.generate_keys("server.pub", "server.priv")
 
     with open("server.conf", 'w') as f:
         f.write(json.dumps({
-            "ip": "0.0.0.0",
+            "ip": "127.0.0.1",
             "port": 6000,
             "fingerprint": hex(keys.fingerprint(keypair[0]))[2:]
         }))
-    server = Server("0.0.0.0", 6000, keypair)
+    server = Server("0.0.0.0", 6000, keypair, "server.sqlite", ".")
     server.run()

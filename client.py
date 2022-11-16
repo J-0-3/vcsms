@@ -16,6 +16,8 @@ class Client:
         self.messages = {}
         self.client_pubkeys = {}
         self.message_handle_function = message_handle_function
+        self.running = False
+        
     def __msg_process_thread(self, data:bytes):
         msg = data.split(b':')
 
@@ -104,23 +106,33 @@ class Client:
 
         self.server.send(client.encode() + b':NewMessage:' + str(index).encode() + b':' + hex(m_dh_pub)[2:].encode() + b':' + m_dh_pub_sig)
     def __thread_incoming(self):
-        while True:
-            msg = self.server.read()
-
-            t_process = threading.Thread(target=self.__msg_process_thread, args=(msg, ))
-            t_process.start()
-
-
+        while self.running:
+            if self.server.new_msg():
+                msg = self.server.read()
+                t_process = threading.Thread(target=self.__msg_process_thread, args=(msg, ))
+                t_process.start()
+                
+    def quit(self):
+        self.running = False
+        
     def run(self):
+        self.running = True
         t_incoming = threading.Thread(target=self.__thread_incoming, args=())
         t_incoming.start()
 
+
 def send_thread(client: Client):
     while True:
-        recipient = input("To: ")
-        message = input("Message: ")
-        client.send(recipient, message.encode())
-
+        action = input("vcsms:> ").lower()
+        if action == "msg":
+            recipient = input("To: ")
+            message = input("Message: ")
+            client.send(recipient, message.encode())
+        elif action == "quit":
+            client.server.send(b"0:QUIT")
+            client.quit()
+            break
+    
 if __name__ == "__main__":
     with open("server.conf", 'r') as conf:
         server = json.loads(conf.read())
@@ -137,9 +149,10 @@ if __name__ == "__main__":
     s = ServerConnection(server["ip"], server["port"], server["fingerprint"])
     s.connect(pub, priv)
     
-    program = Client(s, (pub, priv))
+    program = Client(s, (pub, priv), lambda s, m: print(f"Message from {s}: {m}\n\nvcsms:> ", end=''))
+    t_send = threading.Thread(target=send_thread,args=(program, ))
+    t_send.start()
     program.run()
-    threading.Thread(target=send_thread,args=(program, )).start()
 
 
     
