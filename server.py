@@ -5,6 +5,7 @@ import json
 import threading
 import keys
 import signing
+
 from cryptographylib import dhke, sha256, aes256, utils
 
 port = 6000
@@ -73,6 +74,8 @@ class Server:
             iv = int(iv, 16)
             data = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), encryption_key, iv)
             recipient, msg = data.split(b':', 1)
+            if recipient.decode() not in self.client_outboxes:
+                self.client_outboxes[recipient.decode()] = Queue()
             if recipient == b'0':
                 request = msg.split(b':')
                 if request[0] == b'GetKey':
@@ -87,10 +90,7 @@ class Server:
                         self.client_outboxes[id].put(b'0:KeyNotFound:' + request[1])
                         continue
             outgoing_msg = id.encode() + b':' + msg
-            if recipient.decode() not in self.client_outboxes:
-                self.client_outboxes[recipient.decode()] = Queue()
             self.client_outboxes[recipient.decode()].put(outgoing_msg)
-
             print(f"Message to {recipient} from {id}")
 
     def __out_thread(self, sock: socket.socket, outbox: Queue, encryption_key: int):
