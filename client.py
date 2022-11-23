@@ -7,17 +7,26 @@ from server_connection import ServerConnection
 import keys
 import signing
 import random
-
+import client_db
 class Client:
-    def __init__(self, server: ServerConnection, keypair: tuple, message_handle_function=lambda s, m: print(f"MESSAGE FROM {s}: {m}")):
+    def __init__(self, server: ServerConnection, keypair: tuple):
         self.server = server
         self.pub, self.priv = keypair
         self.dhke_group = dhke.group14_2048
         self.messages = {}
         self.client_pubkeys = {}
-        self.message_handle_function = message_handle_function
         self.running = False
-        
+        self.db_path = "client.db"
+
+    def db_connect(self):
+        db = client_db.Client_DB(self.db_path)
+        return db
+    def message_handle(self, sender, message):
+        print(f"New message from {sender}: {message}\n\nvcsms:> ", end='')
+        db = self.db_connect()
+        db.insert_message(sender, message)
+        db.close()
+
     def __msg_process_thread(self, data:bytes):
         msg = data.split(b':')
 
@@ -89,7 +98,7 @@ class Client:
                 key = self.messages[index]["encryption_key"]
                 plaintext = aes256.decrypt_cbc(ciphertext, key, iv)
                 self.messages.pop(index)
-                self.message_handle_function(sender.decode(), plaintext)
+                self.message_handle(sender.decode(), plaintext)
             else:
                 print(f"Unrecognised message type: {msg_type.decode()}")
 
@@ -128,11 +137,16 @@ def send_thread(client: Client):
             recipient = input("To: ")
             message = input("Message: ")
             client.send(recipient, message.encode())
+        elif action == 'name':
+            name = input("name: ")
+            id = input("id: ")
+
         elif action == "quit":
             client.server.send(b"0:QUIT")
             client.quit()
             break
-    
+
+
 if __name__ == "__main__":
     with open("server.conf", 'r') as conf:
         server = json.loads(conf.read())
@@ -149,7 +163,7 @@ if __name__ == "__main__":
     s = ServerConnection(server["ip"], server["port"], server["fingerprint"])
     s.connect(pub, priv)
     
-    program = Client(s, (pub, priv), lambda s, m: print(f"Message from {s}: {m}\n\nvcsms:> ", end=''))
+    program = Client(s, (pub, priv))
     t_send = threading.Thread(target=send_thread,args=(program, ))
     t_send.start()
     program.run()
