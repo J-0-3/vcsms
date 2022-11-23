@@ -20,34 +20,34 @@ def sieve_of_eratosthenes(maximum: int) -> list:
                 primes[j - 2] = 1
         i += 1
 
-    return [x + 2 for x in filter(lambda i: primes[i] == 0, range(len(primes)))]
+    return [x + 2 for x in filter(lambda n: primes[n] == 0, range(len(primes)))]
 
-primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module import 
+primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module import
 def miller_rabin_primality_test(n: int, r: int):
-        if n % 2 == 0:
+        if n % 2 == 0 or n == 1:
             return False
-        u = n - 1
-        k = 0
-        # need u to be odd and u * 2^k == n - 1
-        while u % 2 == 0:
-            u //= 2
-            k += 1
+        d = n - 1
+        s = 0
+        # need d to be odd and d * 2^s == n - 1
+        while d % 2 == 0:
+            d //= 2
+            s += 1
         
         for i in range(r):
-            a = random.randrange(1, n - 1)
-            b = pow(a, u, n)
-            if b == 1 or b == n - 1:
+            a = random.randrange(2, n - 1)
+            b = pow(a, d, n)
+            if b == 1 or b == n - 1:   # +- 1 (mod n)
                 continue
-            
-            check_next = False
-            for j in range(k - 1):
+            for j in range(s):
+                check_next = False
                 b = pow(b, 2, n)
-                if b == n - 1:
-                    check_next = True # likely is prime
+                if b == n - 1: # likely is prime (as this means it divides n)
+                    check_next = True
                     break
             if not check_next:
-                return False # not prime
+                return False
         return True
+
 
 def is_prime(x: int):
     for p in primes_up_to_1_million:

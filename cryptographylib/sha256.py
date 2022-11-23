@@ -28,16 +28,17 @@ def hash(message: bytes) -> int:
     """
     message_block = b''
     message_block += message
-    message_block += (0b10000000).to_bytes(1, byteorder='big')  # append 1000000 so that it will always pad even if already 464 bits
+    message_block += (0b10000000).to_bytes(1,
+                                           byteorder='big')  # append 1000000 so that it will always pad even if already 464 bits
     while (len(message_block) * 8 + 64) % 512 != 0:  # a 64-bit integer will be added to end so pad to 512*n - 64
         message_block += (0).to_bytes(1, byteorder='big')
 
-    message_block += (len(message) * 8).to_bytes(8, byteorder='big')  # 64-bit integer containing the length of the message
+    message_block += (len(message) * 8).to_bytes(8,
+                                                 byteorder='big')  # 64-bit integer containing the length of the message
 
     chunks = []
     for i in range(0, len(message_block), 64):  # split into 512-bit (64 byte) chunks
         chunks.append(message_block[i:i + 64])
-
 
     # government document says use these wacky magic numbers
 
@@ -54,24 +55,32 @@ def hash(message: bytes) -> int:
          0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
 
     for c in chunks:
-        
-        def sigma_zero(x: int) -> int: return circular_right_shift(x, 7) ^ circular_right_shift(x, 18) ^ (x >> 3)    
-        def sigma_one(x:int) -> int: return circular_right_shift(x, 17) ^ circular_right_shift(x, 19) ^ (x >> 10)
+
+        def sigma_zero(x: int) -> int:
+            return circular_right_shift(x, 7) ^ circular_right_shift(x, 18) ^ (x >> 3)
+
+        def sigma_one(x: int) -> int:
+            return circular_right_shift(x, 17) ^ circular_right_shift(x, 19) ^ (x >> 10)
 
         words = []
         for i in range(0, len(c), 4):
             words.append(int.from_bytes(c[i:i + 4], byteorder='big'))
         for i in range(16, 64):
-            words.append((sigma_one(words[i-2]) + words[i-7] + sigma_zero(words[i-15]) + words[i-16]) % 2 ** 32)
-        
-    
+            words.append((sigma_one(words[i - 2]) + words[i - 7] + sigma_zero(words[i - 15]) + words[i - 16]) % 2 ** 32)
 
-        a,b,c,d,e,f,g,h = H
-        def sigma_zero(x: int) -> int: return circular_right_shift(x, 2) ^ circular_right_shift(x, 13) ^ circular_right_shift(x, 22)
-        def sigma_one(x: int) -> int: return circular_right_shift(x, 6) ^ circular_right_shift(x, 11) ^ circular_right_shift(x, 25)
-        def choice(x: int, y: int, z: int) -> int: return (x & y) ^ (~x & z)
-        def majority(x: int, y: int, z: int) -> int: return (x & y) ^ (x & z) ^ (y & z)
+        a, b, c, d, e, f, g, h = H
 
+        def sigma_zero(x: int) -> int:
+            return circular_right_shift(x, 2) ^ circular_right_shift(x, 13) ^ circular_right_shift(x, 22)
+
+        def sigma_one(x: int) -> int:
+            return circular_right_shift(x, 6) ^ circular_right_shift(x, 11) ^ circular_right_shift(x, 25)
+
+        def choice(x: int, y: int, z: int) -> int:
+            return (x & y) ^ (~x & z)
+
+        def majority(x: int, y: int, z: int) -> int:
+            return (x & y) ^ (x & z) ^ (y & z)
 
         for i in range(64):
             t_word_1 = (h + sigma_one(e) + choice(e, f, g) + k[i] + words[i]) % 2 ** 32
@@ -85,7 +94,7 @@ def hash(message: bytes) -> int:
             b = a
             a = (t_word_1 + t_word_2) % 2 ** 32
 
-        H[0] = (H[0] + a) % 2 ** 32 
+        H[0] = (H[0] + a) % 2 ** 32
         H[1] = (H[1] + b) % 2 ** 32
         H[2] = (H[2] + c) % 2 ** 32
         H[3] = (H[3] + d) % 2 ** 32
@@ -93,17 +102,18 @@ def hash(message: bytes) -> int:
         H[5] = (H[5] + f) % 2 ** 32
         H[6] = (H[6] + g) % 2 ** 32
         H[7] = (H[7] + h) % 2 ** 32
-     
-    resultant_hash = H[7] + H[6] * 2**32 + H[5] * 2**64 + H[4] * 2**96 + H[3] * 2**128 + H[2] * 2**160 + H[1] * 2**192 + H[0] * 2**224 # concatenate final hash values
-    return resultant_hash
 
+    resultant_hash = H[7] + H[6] * 2 ** 32 + H[5] * 2 ** 64 + H[4] * 2 ** 96 + H[3] * 2 ** 128 + H[2] * 2 ** 160 + H[
+        1] * 2 ** 192 + H[0] * 2 ** 224  # concatenate final hash values
+    return resultant_hash
 
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
         print(hex(hash(input().encode()))[2:])
     else:
         for file in sys.argv[1:]:
-            with open(file, "rb") as f:
-                print(hex(hash(f.read()))[2:])
+            with open(file, "rb") as data:
+                print(hex(hash(data.read()))[2:])

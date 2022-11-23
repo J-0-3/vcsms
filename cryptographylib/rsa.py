@@ -12,11 +12,17 @@ def gcd_extended_euclid(a: int, b: int) -> tuple:
     Returns:
         tuple: (gcd, x, y)
     """
-    # this method calculates the greatest common divisor of a and b as well as x and y such that ax + by = gcd(a, b)
     if a == 0:
-        return [b, 0, 1]
+        return b, 0, 1
     gcd, x, y = gcd_extended_euclid(b % a, a)
-    return gcd, y - x * (b // a), x
+
+    stored_x = x
+    x = y - x * (b // a)
+    y = stored_x
+
+    return gcd, x, y
+
+
 
 
 def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
