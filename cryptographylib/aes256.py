@@ -531,7 +531,7 @@ def encrypt_ecb(data: bytes, key: int) -> bytes:
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes(data)
+    data_as_int = int.from_bytes(data, 'big')
     message_blocks = split_blocks(data_as_int)
     key_schedule = expand_key(key)
     ciphertext_blocks = [encrypt_block(key_schedule, block) for block in message_blocks]
@@ -552,7 +552,7 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
     Returns:
         bytes: The decrypted plaintext bytestring
     """
-    ciphertext_as_int = int.from_bytes(ciphertext)
+    ciphertext_as_int = int.from_bytes(ciphertext, 'big')
     ciphertext_blocks = split_blocks(ciphertext_as_int)
     key_schedule = expand_key(key)
     message_blocks = [decrypt_block(key_schedule, block) for block in ciphertext_blocks]
@@ -580,7 +580,7 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes(data)
+    data_as_int = int.from_bytes(data, 'big')
     message_blocks = split_blocks(data_as_int) # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
@@ -611,7 +611,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     Returns:
         bytes: The decrypted plaintext bytestring
     """
-    ciphertext_as_int = int.from_bytes(ciphertext)
+    ciphertext_as_int = int.from_bytes(ciphertext, 'big')
     ciphertext_blocks = split_blocks(ciphertext_as_int)
     key_schedule = expand_key(key)
     message_blocks = []

@@ -50,7 +50,6 @@ class ServerConnection:
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self.encryption_key = sha256.hash(utils.i_to_b(shared_key))
-        print(f"Encryption Key: {self.encryption_key}")
         
     def connect(self, pub_key, priv_key, skip_fp_verify: bool = False):
         self.connected = True
