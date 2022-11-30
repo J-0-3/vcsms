@@ -28,13 +28,13 @@ def hash(message: bytes) -> int:
     """
     message_block = b''
     message_block += message
-    message_block += (0b10000000).to_bytes(1,
-                                           byteorder='big')  # append 1000000 so that it will always pad even if already 464 bits
+    message_block += (0b10000000).to_bytes(1, byteorder='big')
+
     while (len(message_block) * 8 + 64) % 512 != 0:  # a 64-bit integer will be added to end so pad to 512*n - 64
         message_block += (0).to_bytes(1, byteorder='big')
 
-    message_block += (len(message) * 8).to_bytes(8,
-                                                 byteorder='big')  # 64-bit integer containing the length of the message
+    message_block += (len(message) * 8).to_bytes(8, byteorder='big')
+    # 64-bit integer containing the length of the message
 
     chunks = []
     for i in range(0, len(message_block), 64):  # split into 512-bit (64 byte) chunks

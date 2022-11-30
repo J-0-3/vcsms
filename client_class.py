@@ -2,6 +2,7 @@ import json
 import threading
 import sys
 import os
+import re
 from cryptographylib import dhke, sha256, aes256
 from cryptographylib.utils import i_to_b
 from server_connection import ServerConnection
@@ -9,6 +10,84 @@ import keys
 import signing
 import random
 import client_db
+
+
+MESSAGE_TYPES = {
+    "client": {
+
+            #type       #argc #arg types         #additional type info (encoding, base, etc)
+            "NewMessage": (3, [int, int, bytes], [10, 16]),
+            "MessageAccept": (3, [int, int, bytes], [10, 16]),
+            "MessageData": (3, [int, int, int], [10, 16, 16])
+
+            "IndexInUse": (1, [int], [10]),
+            "InvalidSignature": (1, [int], [10]),
+            "NoSuchIndex": (1, [int], [10])
+
+    },
+    "server": {
+        "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
+
+        "KeyNotFound": (1, [str], ['utf-8'])
+    }
+}
+
+def cast_from_bytes(values: list, message_schema: tuple) -> list:
+    length, types, type_info = message_schema
+    if len(values) != length:
+        print(f"Cannot cast {len(values)} values to {length} types")
+        return []
+    casted = []
+    for i in range(len(values)):
+        try:
+            if types[i] is int:
+                casted.append(int(values[i], type_info[i]))
+            elif types[i] is str:
+                casted.append(str(values[i], type_info[i]))
+            elif types[i] is bytes:
+                casted.append(values[i])
+        except TypeError:
+            print(f"Cannot cast {values[i]} to {types[i]}")
+            return []
+    return casted
+
+def construct_message(recipient: str, message_type: str, values: list) -> bytes:
+    if recipient == '0':
+        if message_type in MESSAGE_TYPES["server"]:
+            message_schema = MESSAGE_TYPES["server"][message_type]
+        else:
+            print(f"Invalid server message type: {message_type}")
+            return b''
+    else:
+        if message_type in MESSAGE_TYPES["client"]:
+            message_schema = MESSAGE_TYPES["client"][message_type]
+        else:
+            print(f"Invalid client message type: {message_type}")
+            return b''
+
+    length, types, type_info = message_schema
+    if len(values) != length:
+        print(f"Invalid number of values for message type {message_type}")
+
+
+def construct_server_message(message_type: str, *values) -> bytes:
+    """
+    Create a message to the server, of a specified type with specified values
+    Args:
+        message_type:
+        *values:
+
+    Returns:
+
+    """
+    if message_type not in MESSAGE_TYPES["server"]["valid"]:
+        print(f"Invalid Message Type to Server: {message_type}")
+        return b''
+    length, types, type_info = MESSAGE_TYPES["server", "valid", "message_type"]
+    if len(values) != length:
+        print(f"Message to Server Has Wrong Number Of Arguments. Message Type: {message_type}")
+
+def construct_exception(recipient: str, exception: str, *values) -> bytes:
 
 
 class Client:
@@ -34,6 +113,42 @@ class Client:
         db.insert_message(sender, message)
         db.close()
 
+    def process_server_exception(self, type: str, values: list):
+        match type:
+            case "KeyNotFound":
+                print(f"Public Key Unknown For {values[0]}")
+
+    def process_server_message(self, type: str, values: list):
+        match type:
+            case "KeyFound":
+                self.client_pubkeys[values[0]] = (values[1], values[2])
+
+    def process_client_exception(self, type: str, payload: list):
+        match type:
+            case "IndexInUse":
+                if int(payload[0])
+
+    def parse_message(self, data: bytes) -> bytes:
+        """
+        Parse a message, handle it, and return a response or empty bytestring if no response needed
+        Args:
+            data: The raw bytes of the message
+
+        Returns:
+            bytes: Either the response to the message or ''
+
+        """
+        if len(data) < 4096:
+            return "invalid length"
+
+        if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9])*'), data.decode()) is None:
+            return "invalid format"
+
+        sender, message_type, payload = data.decode().split(':')
+
+        if sender == b'0':
+            self.process_server_message(message_type, payload)
+
     def __msg_process_thread(self, data:bytes):
         msg = data.split(b':')
 
@@ -50,7 +165,7 @@ class Client:
 
             if msg_type == b"NewMessage":
                 if index in self.messages:
-                    self.server.send(sender + b':MessageReject:' + msg[2] + b':IndexInUse')
+                    self.server.send(sender + b':IndexInUse:' + msg[2])
                     return
 
                 p_dh_pub = int(msg[3], 16)
@@ -60,7 +175,7 @@ class Client:
                     while sender.decode() not in self.client_pubkeys: continue
 
                 if not signing.verify(msg[3], p_dh_pub_sig, self.client_pubkeys[sender.decode()]):
-                    self.server.send(sender + b':MessageReject:' + msg[2] + b':InvalidSignature')
+                    self.server.send(sender + b':InvalidSignature:' + msg[2])
                     return
 
                 m_dh_priv = random.randrange(1, self.dhke_group[1])
@@ -75,7 +190,7 @@ class Client:
 
             elif msg_type == b"MessageAccept":
                 if index not in self.messages:
-                    self.server.send(sender + b':InvalidResponse:' + msg[2] + b':NoSuchIndex')
+                    self.server.send(sender + b':NoSuchIndex:' + msg[2])
                     return
                 p_dh_pub = int(msg[3], 16)
                 p_dh_pub_sig = msg[4]
@@ -84,7 +199,7 @@ class Client:
                     while sender.decode() not in self.client_pubkeys: continue
 
                 if not signing.verify(msg[3], p_dh_pub_sig, self.client_pubkeys[sender.decode()]):
-                    self.server.send(sender + b':InvalidResponse:' + msg[2] + b':InvalidSignature')
+                    self.server.send(sender + b':InvalidSignature:' + msg[2])
                     return
 
                 m_dh_priv = self.messages[index]["dh_private"]
@@ -98,7 +213,7 @@ class Client:
 
             elif msg_type == b"MessageData":
                 if index not in self.messages:
-                    self.server.send(sender + b':InvalidResponse:' + msg[2] + b':NoSuchIndex')
+                    self.server.send(sender + b':NoSuchIndex:' + msg[2])
                     return
                 iv = int(msg[3], 16)
                 ciphertext = i_to_b(int(msg[4], 16))
