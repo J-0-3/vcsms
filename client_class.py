@@ -14,29 +14,32 @@ import client_db
 
 MESSAGE_TYPES = {
     "client": {
-
             #type       #argc #arg types         #additional type info (encoding, base, etc)
             "NewMessage": (3, [int, int, bytes], [10, 16]),
             "MessageAccept": (3, [int, int, bytes], [10, 16]),
-            "MessageData": (3, [int, int, int], [10, 16, 16])
+            "MessageData": (3, [int, int, str], [10, 16]),
 
             "IndexInUse": (1, [int], [10]),
             "InvalidSignature": (1, [int], [10]),
-            "NoSuchIndex": (1, [int], [10])
-
+            "NoSuchIndex": (1, [int], [10]),
+            "RetransmitDiffieHellman": (1, [int], [10])
     },
     "server": {
-        "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
-
-        "KeyNotFound": (1, [str], ['utf-8'])
+        "responses": {
+            "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
+            "KeyNotFound": (1, [str], ['utf-8']),
+        },
+        "requests": {
+            "GetKey": (1, [str], ['utf-8'])
+        }
     }
 }
 
-def cast_from_bytes(values: list, message_schema: tuple) -> list:
+def interpret_message_values(values: list, message_schema: tuple) -> list:  # cast an array of byte strings to the values specified in the message schema
     length, types, type_info = message_schema
-    if len(values) != length:
+    if len(values) < length:
         print(f"Cannot cast {len(values)} values to {length} types")
-        return []
+        return -1
     casted = []
     for i in range(len(values)):
         try:
@@ -48,15 +51,15 @@ def cast_from_bytes(values: list, message_schema: tuple) -> list:
                 casted.append(values[i])
         except TypeError:
             print(f"Cannot cast {values[i]} to {types[i]}")
-            return []
+            return -1
     return casted
 
-def construct_message(recipient: str, message_type: str, values: list) -> bytes:
+def construct_message(recipient: str, message_type: str, *values) -> bytes:
     if recipient == '0':
-        if message_type in MESSAGE_TYPES["server"]:
-            message_schema = MESSAGE_TYPES["server"][message_type]
+        if message_type in MESSAGE_TYPES["server"]["requests"]:
+            message_schema = MESSAGE_TYPES["server"]["requests"][message_type]
         else:
-            print(f"Invalid server message type: {message_type}")
+            print(f"Invalid server request type: {message_type}")
             return b''
     else:
         if message_type in MESSAGE_TYPES["client"]:
@@ -69,25 +72,33 @@ def construct_message(recipient: str, message_type: str, values: list) -> bytes:
     if len(values) != length:
         print(f"Invalid number of values for message type {message_type}")
 
+    values_as_bytes = []
+    for i in range(length):
+        if values[i] is not types[i]:
+            print(f"Invalid value for {types[i]}: {values[i]}")
+            return b''
 
-def construct_server_message(message_type: str, *values) -> bytes:
-    """
-    Create a message to the server, of a specified type with specified values
-    Args:
-        message_type:
-        *values:
-
-    Returns:
-
-    """
-    if message_type not in MESSAGE_TYPES["server"]["valid"]:
-        print(f"Invalid Message Type to Server: {message_type}")
-        return b''
-    length, types, type_info = MESSAGE_TYPES["server", "valid", "message_type"]
-    if len(values) != length:
-        print(f"Message to Server Has Wrong Number Of Arguments. Message Type: {message_type}")
-
-def construct_exception(recipient: str, exception: str, *values) -> bytes:
+        if types[i] is int:
+            if type_info[i] == 10:
+                values_as_bytes.append(str(values[i]).encode('utf-8'))
+            elif types[i] == 16:
+                values_as_bytes.append(hex(values[i]).encode('utf-8')[2:])
+        elif types[i] is str:
+            values_as_bytes.append(values[i].encode(type_info[i]))
+        elif types[i] is bytes:
+            values_as_bytes.append(values[i])
+    
+    message = b''
+    message += recipient.encode() + b':'
+    message += message_type.encode()
+    for v in values_as_bytes:
+        message += b':' + v
+    
+    if len(message) < 4096:
+        message += b':'
+    while len(message) < 4096:
+        message += hex(random.randint(0, 15)).encode('utf-8')[2:]
+    return message
 
 
 class Client:
@@ -113,21 +124,69 @@ class Client:
         db.insert_message(sender, message)
         db.close()
 
-    def process_server_exception(self, type: str, values: list):
-        match type:
-            case "KeyNotFound":
-                print(f"Public Key Unknown For {values[0]}")
-
-    def process_server_message(self, type: str, values: list):
+    def process_server_message(self, type: str, values: list) -> bytes:
         match type:
             case "KeyFound":
                 self.client_pubkeys[values[0]] = (values[1], values[2])
-
-    def process_client_exception(self, type: str, payload: list):
+                return b''
+            case "KeyNotFound":
+                print(b"Server Could Not Locate Public Key For {values[0]}")
+                return b''
+    
+    def process_client_message(self, sender: str, type: str, values: list):
         match type:
-            case "IndexInUse":
-                if int(payload[0])
+            case "NewMessage":
+                if values[0] in self.messages:
+                    return construct_message(sender, "IndexInUse", values[0])
+                if sender not in self.client_pubkeys:
+                    return construct_message("0", "GetKey", sender), construct_message(sender, "RetransmitDiffieHellman", values[0])
+                if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
+                    return construct_message(sender, "InvalidSignature", values[0])
+                
+                dh_priv = random.randrange(1, self.dhke_group[1])
+                dh_pub = dhke.generate_public_key(dh_priv, self.dhke_group)
+                dh_pub_sig = signing.sign(hex(dh_pub)[2:].encode(), self.priv)
+                shared_secret = dhke.calculate_shared_key(dh_priv, values[1], self.dhke_group)
+                encryption_key = sha256.hash(i_to_b(shared_secret))
+                self.messages[values[0]] = {"dh_private": 0,
+                                        "encryption_key": encryption_key,
+                                        "data": b''}
+                return construct_message(sender, "MessageAccept", values[0], dh_pub, dh_pub_sig)
 
+            case "MessageAccept":
+                if values[0] not in self.messages:
+                    return construct_message(sender, "NoSuchIndex", values[0])
+                if sender not in self.client_pubkeys:
+                    return construct_message("0", "GetKey", sender), construct_message(sender, "RetransmitDiffieHellman", values[0])
+                if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
+                    return construct_message(sender, "InvalidSignature", values[0])
+                
+                dh_priv = self.messages[values[0]]["dh_private"]
+                shared_secret = dhke.calculate_shared_key(dh_priv, values[1], self.dhke_group)
+                encryption_key = sha256.hash(i_to_b(shared_secret))
+                plaintext = self.messages[values[0]]["data"]
+                aes_iv = random.randrange(2, 2**128)
+                ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
+                self.messages.pop(values[0])
+                return construct_message(sender, "MessageData", values[0], aes_iv, ciphertext.hex())
+
+            case "MessageData":
+                if values[0] not in self.messages:
+                    return construct_message(sender, "NoSuchIndex", values[0])
+                ciphertext = bytes.fromhex(values[2])
+                encryption_key = self.messages[values[0]]["encryption_key"]
+                plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, values[1])
+                self.messages.pop(values[0])
+                self.message_handle(sender, plaintext)
+            
+            case "IndexInUse":
+                message = self.messages[values[0]]
+                new_id = random.randrange(1, 2**64)
+                self.messages.pop(values[0])
+                self.messages[new_id] = message
+                return construct_message(sender, "NewMessage", new_id, )
+            
+    def 
     def parse_message(self, data: bytes) -> bytes:
         """
         Parse a message, handle it, and return a response or empty bytestring if no response needed
@@ -138,18 +197,42 @@ class Client:
             bytes: Either the response to the message or ''
 
         """
-        if len(data) < 4096:
-            return "invalid length"
+        try:
+            if len(data) < 4096:
+                print("invalid length")
+                return b''
 
-        if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9])*'), data.decode()) is None:
-            return "invalid format"
+            if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9])*'), data.decode()) is None:
+                print("invalid format")
+                return b''
+        
+            sender, message_type, payload = data.split(b':', 2)
+            sender = sender.decode('utf-8')
+            message_type = message_type.decode('utf-8')
 
-        sender, message_type, payload = data.decode().split(':')
-
-        if sender == b'0':
-            self.process_server_message(message_type, payload)
+            if sender == '0':
+                if message_type in MESSAGE_TYPES["server"]["responses"]:
+                    message_values = interpret_message_values(payload.split(b':'), MESSAGE_TYPES["server"]["responses"][message_type])
+                    if message_values == -1:
+                        return b''
+                    return self.process_server_message(message_type, message_values)
+            else:
+                if message_type in MESSAGE_TYPES["client"]:
+                    message_values = interpret_message_values(payload.split(b':'), MESSAGE_TYPES["client"][message_type])
+                    if message_values == -1:
+                        return b''
+                    return self.process_client_message(sender, message_type, message_values)
+        except Exception as e:
+            print(f"ERROR PARSING MESSAGE DATA: {e.with_traceback()}")
 
     def __msg_process_thread(self, data:bytes):
+        
+        response = self.parse_message(data)
+        if response:
+            for r in response:
+                self.server.send(r)
+                        
+        ###################### in process of destruction
         msg = data.split(b':')
 
         sender = msg[0]
