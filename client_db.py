@@ -1,14 +1,16 @@
 import sqlite3
 import math
 class Client_DB:
-    def __init__(self, path: str):
+    def __init__(self, path: str, message_file_prefix: str = "messages"):
         self.db = sqlite3.connect(path)
         self.MESSAGE_BLOCK_LENGTH = 100
-        self.message_file_prefix = "messages"
+        self.message_file_prefix = message_file_prefix
+
     def setup(self):
         self.db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text unique, nickname text unique)")
         self.db.execute("CREATE TABLE IF NOT EXISTS message_logs (id text, filename_index integer unique, complete integer)")
         self.db.commit()
+
     def get_nickname(self, id: str):
         cursor = self.db.cursor()
         cursor.execute("SELECT nickname FROM nicknames WHERE id=?", (id, ))
@@ -27,6 +29,7 @@ class Client_DB:
         if result is None:
             return None
         return result[0]
+
     def get_messages_by_id(self, id: str, count: int):
         cursor = self.db.cursor()
         num_files = math.ceil(count/self.MESSAGE_BLOCK_LENGTH)
@@ -80,7 +83,6 @@ class Client_DB:
                     self.db.execute("REPLACE INTO message_logs VALUES(?, ?, ?)", (sender_id, filename_index, 1))
                     self.db.commit()
                 f.write(f'{message},')
-
 
     def set_nickname(self, id: str, nickname: str):
         self.db.execute("REPLACE INTO nicknames VALUES(?, ?)", (id, nickname))

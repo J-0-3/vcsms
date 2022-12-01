@@ -17,5 +17,9 @@ def load_key(path: str):
         exp, mod = f.read().split(':')
         key = (int(exp, 16), int(mod, 16))
     return key
-def fingerprint(key: tuple):
-    return sha256.hash(hex(key[0])[2:].encode() + hex(key[1])[2:].encode())
+def fingerprint(key: tuple) -> str:
+    hash = sha256.hash(hex(key[0])[2:].encode() + hex(key[1])[2:].encode())
+    hex_fp = hex(hash)[2:]
+    while len(hex_fp) < 64:
+        hex_fp = "0" + hex_fp
+    return hex_fp

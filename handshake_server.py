@@ -62,7 +62,7 @@ if __name__ == "__main__":
         f.write(json.dumps({
             "ip": address[0],
             "port": address[1],
-            "fingerprint": hex(keys.fingerprint(pub))[2:]
+            "fingerprint": keys.fingerprint(pub)
         })) 
     s.bind(address)
     s.listen()

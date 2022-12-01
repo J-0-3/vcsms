@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import argparse
 
 from client_class import Client
 
@@ -24,12 +25,16 @@ def send_thread(client: Client):
 
 
 if __name__ == "__main__":
-    with open("server.conf", 'r') as conf:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("ip", type=str, help="The ip address of the server to connect to")
+    parser.add_argument("config", type=str, help="The server's connection file (.vcsms)")
+    parser.add_argument("-d", "--directory", type=str, default="vcsms", help="The location to store application files")
+    args = parser.parse_args()
+
+    with open(args.config, 'r') as conf:
         server = json.loads(conf.read())
 
-    application_directory = sys.argv[1]
-
-    program = Client("server.conf", application_directory)
+    program = Client(args.ip, server["port"], server["fingerprint"], args.directory)
     t_send = threading.Thread(target=send_thread, args=(program,))
     program.run()
     t_send.start()

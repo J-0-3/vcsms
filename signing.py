@@ -1,4 +1,4 @@
-from cryptographylib import rsa, sha256, utils
+from cryptographylib import rsa, sha256, utils, dhke
 
 
 def sign(data: bytes, priv_key: tuple) -> bytes:
@@ -15,3 +15,10 @@ def verify(data: bytes, signature: bytes, pub_key: tuple):
     if sig_hash == sha_hash:
         return True
     return False
+
+
+def gen_signed_diffie_hellman(dh_private_key: int, rsa_private_key: tuple, dh_group: tuple):
+    dh_public_key = dhke.generate_public_key(dh_private_key, dh_group)
+    dh_public_key_hex = hex(dh_public_key)[2:].encode()
+    dh_signature = sign(dh_public_key_hex, rsa_private_key)
+    return dh_public_key, dh_signature
