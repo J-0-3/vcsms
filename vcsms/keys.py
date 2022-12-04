@@ -1,5 +1,5 @@
-from cryptographylib import rsa, sha256
-import signing
+from .cryptographylib import rsa, sha256
+from . import signing
 
 
 def write_key(key: tuple, out: str):

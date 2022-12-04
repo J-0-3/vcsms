@@ -1,13 +1,12 @@
 import json
-import sys
 import threading
 import argparse
 
-from client_class import Client
+from vcsms.client import Client
 
 
 def send_thread(client: Client):
-    while True:
+    while client.running:
         action = input("vcsms:> ").lower()
         if action == "msg":
             recipient = input("To: ")
@@ -19,9 +18,14 @@ def send_thread(client: Client):
             client.add_contact(name, id)
 
         elif action == "quit":
-            client.server.send(b"0:QUIT")
             client.quit()
-            break
+
+
+def receive_thread(client: Client):
+    while client.running:
+        if client.new_message():
+            sender, message = client.receive()
+            print(f"New message from {sender}: {message}\nvcsms:> ", end='')
 
 
 if __name__ == "__main__":
@@ -36,7 +40,9 @@ if __name__ == "__main__":
 
     program = Client(args.ip, server["port"], server["fingerprint"], args.directory)
     t_send = threading.Thread(target=send_thread, args=(program,))
+    t_recv = threading.Thread(target=receive_thread, args=(program,))
     program.run()
+    t_recv.start()
     t_send.start()
 
 

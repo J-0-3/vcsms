@@ -1,6 +1,6 @@
 import random
-from cryptographylib import primes
-from cryptographylib.utils import i_to_b
+from . import primes
+from .utils import i_to_b
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b and also the values x and y such that ax + by = gcd (a,b).

@@ -3,10 +3,10 @@ import random
 import threading
 from queue import Queue
 
-import keys
-import signing
-from non_stream_socket import NonStreamSocket
-from cryptographylib import dhke, sha256, utils, aes256
+from . import keys
+from . import signing
+from .non_stream_socket import NonStreamSocket
+from .cryptographylib import dhke, sha256, utils, aes256
 
 
 class ServerConnection:
@@ -63,7 +63,7 @@ class ServerConnection:
         t_out.start()
 
     def __in_thread(self):
-        while True:        
+        while self.connected:        
             data = self.socket.recv()
             if data == b'CLOSE':
                 self.connected = False

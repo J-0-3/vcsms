@@ -1,6 +1,6 @@
 import sqlite3
 import os
-import keys
+from . import keys
 
 class Server_DB:
     def __init__(self, path='server.db', pubkey_directory='client_public_keys'):

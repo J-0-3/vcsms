@@ -1,4 +1,4 @@
-from cryptographylib import rsa, sha256, utils, dhke
+from .cryptographylib import rsa, sha256, utils, dhke
 
 
 def sign(data: bytes, priv_key: tuple) -> bytes:
