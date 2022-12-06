@@ -28,7 +28,7 @@ def miller_rabin_primality_test(n: int, r: int):
             return False
         d = n - 1
         s = 0
-        # need d to be odd and d * 2^s == n - 1
+        # divide d as far as possible
         while d % 2 == 0:
             d //= 2
             s += 1

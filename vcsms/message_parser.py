@@ -73,7 +73,7 @@ class MessageParser:
         try:
             if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$'), data.decode()) is None:
                 print("invalid format")
-                return b''
+                return ()
             sender, message_type, payload = data.split(b':', 2)
             sender = sender.decode('utf-8')
             message_type = message_type.decode('utf-8')

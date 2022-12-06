@@ -20,7 +20,6 @@ def send_thread(client: Client):
         elif action == "quit":
             client.quit()
 
-
 def receive_thread(client: Client):
     while client.running:
         if client.new_message():
@@ -32,7 +31,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("ip", type=str, help="The ip address of the server to connect to")
     parser.add_argument("config", type=str, help="The server's connection file (.vcsms)")
-    parser.add_argument("-d", "--directory", type=str, default="vcsms", help="The location to store application files")
+    parser.add_argument("-d", "--directory", type=str, default="vcsms", help="Where to store application files")
     args = parser.parse_args()
 
     with open(args.config, 'r') as conf:
