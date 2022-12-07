@@ -1,4 +1,5 @@
 import random
+from typing import Union
 from . import primes
 from .utils import i_to_b
 
@@ -72,7 +73,9 @@ def encrypt(plaintext: bytes, exponent: int, modulus: int) -> bytes:
     Returns:
         int: The encrypted ciphertext
     """
-    return i_to_b(pow(int.from_bytes(plaintext, 'big'), exponent, modulus))
+    
+    plaintext = int.from_bytes(plaintext, 'big')
+    return i_to_b(pow(plaintext, exponent, modulus))
 
 
 def decrypt(ciphertext: bytes, exponent: int, modulus: int) -> bytes:
@@ -110,9 +113,8 @@ def gen_keypair(length: int = 2048):
             q = random.randrange(1, 2**(length//2))
     
         pub, priv = calculate_keys(p, q)
-        plaintext = b'test'
-        ciphertext = encrypt(plaintext, *pub)
-        if decrypt(ciphertext, *priv) == plaintext:
+        ciphertext = encrypt(b'\xde\xad\xbe\xef', *pub)
+        if decrypt(ciphertext, *priv) == b'\xde\xad\xbe\xef':
             return pub,priv
     
     
@@ -172,6 +174,7 @@ if __name__ == "__main__":
                     f.write(ciphertext.to_bytes((ciphertext.bit_length() + 7) // 8))
             else:
                 print(hex(ciphertext))
+                
                 
     elif args.command == "gen":
         pub,priv = gen_keypair(int(args.length))

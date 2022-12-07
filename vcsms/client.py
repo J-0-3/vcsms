@@ -1,9 +1,7 @@
-import json
 import threading
-import sys
 import os
-import re
 import random
+from typing import Union
 from queue import Queue
 
 from .cryptographylib import dhke, sha256, aes256
@@ -94,6 +92,7 @@ class Client:
         
     def run(self):
         os.makedirs(os.path.join(self.app_dir, "messages"), exist_ok=True)
+        os.makedirs(os.path.join(self.app_dir, "keys"), exist_ok=True)
         db = self.db_connect()
         db.setup()
         db.close()
@@ -136,37 +135,48 @@ class Client:
     # message type handlers
 
     def handler_key_found(self, _, values: list) -> None:
-        self.client_pubkeys[values[0]] = (values[1], values[2])
+        db = self.db_connect()
+        db.save_key(values[0], (values[1], values[2]))
+        db.close()
     
     def handler_key_not_found(self, _, values: list) -> None:
         print(f"Server could not locate public key for {values[0]}")
     
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
+        db = self.db_connect()
         if values[0] in self.messages:
+            db.close()
             return "IndexInUse", (values[0], )
 
-        if sender not in self.client_pubkeys:
+        if not db.user_known(sender):
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
+            db.close()
             return "ResendAuthPacket", (values[0], )
-                                                  
-        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
+                                                              
+        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], db.get_key(sender)):
+            db.close()
             return "InvalidSignature", (values[0], )
-
+    
         dh_priv = random.randrange(1, self.dhke_group[1])
         dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group)
         shared_secret = dhke.calculate_shared_key(dh_priv, values[1], self.dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
         
         self.messages[values[0]] = {"dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
+        db.close()
         return "MessageAccept", (values[0], dh_pub, dh_pub_sig)
 
     def handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
+        db = self.db_connect()
         if values[0] not in self.messages:
+            db.close()
             return "NoSuchIndex", (values[0], )
-        if sender not in self.client_pubkeys:
+        if not db.user_known(sender):
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
+            db.close()
             return "ResendAuthPacket", (values[0], )
-        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
+        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], db.get_key(sender)):
+            db.close()
             return "InvalidSignature", (values[0], )
 
         dh_priv = self.messages[values[0]]["dh_private"]
@@ -177,9 +187,11 @@ class Client:
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
         
         self.messages.pop(values[0])
+        db.close()
         return "MessageData", (values[0], aes_iv, ciphertext.hex())
     
-    def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple]|None:
+
+    def handler_message_data(self, sender: str, values: list) -> Union[tuple[str, tuple], None]:
         if values[0] not in self.messages:
             return "NoSuchIndex", (values[0], )
         ciphertext = bytes.fromhex(values[2])
@@ -214,5 +226,5 @@ class Client:
                 return "NewMessage", (values[0], dh_public, dh_signature)  
 
     def db_connect(self):
-        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/")
+        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/", os.path.join(self.app_dir, "keys") + "/")
         return db

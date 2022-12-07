@@ -1,10 +1,15 @@
 import sqlite3
 import math
+import os
+from . import keys
+
+
 class Client_DB:
-    def __init__(self, path: str, message_file_prefix: str = "messages"):
+    def __init__(self, path: str, message_file_prefix: str = "messages", key_file_prefix = "keys"):
         self.db = sqlite3.connect(path)
         self.MESSAGE_BLOCK_LENGTH = 100
         self.message_file_prefix = message_file_prefix
+        self.key_file_prefix = key_file_prefix
 
     def setup(self):
         self.db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text unique, nickname text unique)")
@@ -87,3 +92,13 @@ class Client_DB:
     def set_nickname(self, id: str, nickname: str):
         self.db.execute("REPLACE INTO nicknames VALUES(?, ?)", (id, nickname))
         self.db.commit()
+
+    def save_key(self, id: str, key: tuple[int, int]):
+        keys.write_key(key, self.key_file_prefix + id)
+    
+    def user_known(self, id: str) -> bool:
+        return os.path.exists(self.key_file_prefix + id)
+
+    def get_key(self, id: str) -> tuple[int, int]:
+        return keys.load_key(self.key_file_prefix + id)
+    
