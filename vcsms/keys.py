@@ -6,11 +6,10 @@ def write_key(key: tuple, out: str):
     with open(out, 'w') as f:
         f.write(f"{hex(key[0])[2:]}:{hex(key[1])[2:]}")
 
-def generate_keys(pub_out, priv_out):
+def generate_keys(pub_out: str, priv_out: str) -> tuple[tuple[int, int], tuple[int, int]]:
     pub, priv = rsa.gen_keypair(2048)
     write_key(pub, pub_out)
     write_key(priv, priv_out)
-
     return pub, priv
 
 def load_key(path: str) -> tuple[int, int]:

@@ -79,10 +79,10 @@ class Client:
         recipient_id = db.get_id(recipient)
         db.close()
         dh_priv = random.randrange(1, self.dhke_group[1])
-        dh_pub, dh_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group)
         index = random.randrange(1, 2 ** 64)
         while index in self.messages:
             index = random.randrange(1, 2 ** 64)
+        dh_pub, dh_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, index)
         self.messages[index] = {
             "dh_private": dh_priv,
             "encryption_key": 0,
@@ -142,45 +142,51 @@ class Client:
         print(f"Server could not locate public key for {values[0]}")
     
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
-        if values[0] in self.messages:
-            return "IndexInUse", (values[0], )
+        message_index, sender_dh_pub, sender_dh_sig = values
+
+        if message_index in self.messages:
+            return "IndexInUse", (message_index, )
 
         if sender not in self.client_pubkeys:
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
-            return "ResendAuthPacket", (values[0], )
-                                                  
-        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
-            return "InvalidSignature", (values[0], )
+            return "ResendAuthPacket", (message_index, )
+        
+        signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
+        if not signing.verify(signature_data, sender_dh_sig, self.client_pubkeys[sender]):
+            return "InvalidSignature", (message_index, )
 
         dh_priv = random.randrange(1, self.dhke_group[1])
         dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group)
-        shared_secret = dhke.calculate_shared_key(dh_priv, values[1], self.dhke_group)
+        shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
         
-        self.messages[values[0]] = {"dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
-        return "MessageAccept", (values[0], dh_pub, dh_pub_sig)
+        self.messages[message_index] = {"dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
+        return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
-        if values[0] not in self.messages:
-            return "NoSuchIndex", (values[0], )
+        message_index, sender_dh_pub, sender_dh_sig = values
+        if message_index not in self.messages:
+            return "NoSuchIndex", (message_index, )
         if sender not in self.client_pubkeys:
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
-            return "ResendAuthPacket", (values[0], )
-        if not signing.verify(hex(values[1])[2:].encode('utf-8'), values[2], self.client_pubkeys[sender]):
-            return "InvalidSignature", (values[0], )
+            return "ResendAuthPacket", (message_index, )
+        
+        signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
+        if not signing.verify(signature_data, sender_dh_sig, self.client_pubkeys[sender]):
+            return "InvalidSignature", (message_index, )
 
-        dh_priv = self.messages[values[0]]["dh_private"]
-        shared_secret = dhke.calculate_shared_key(dh_priv, values[1], self.dhke_group)
+        dh_priv = self.messages[message_index]["dh_private"]
+        shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
-        plaintext = self.messages[values[0]]["data"]
+        plaintext = self.messages[message_index]["data"]
         aes_iv = random.randrange(2, 2 ** 128)
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
-        
-        self.messages.pop(values[0])
-        return "MessageData", (values[0], aes_iv, ciphertext.hex())
+        self.messages.pop(message_index)
+        return "MessageData", (message_index, aes_iv, ciphertext.hex())
     
     def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple]|None:
-        if values[0] not in self.messages:
+        message_index, aes_iv, ciphertext = values
+        if message_index not in self.messages:
             return "NoSuchIndex", (values[0], )
         ciphertext = bytes.fromhex(values[2])
         encryption_key = self.messages[values[0]]["encryption_key"]

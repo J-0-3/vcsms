@@ -14,6 +14,7 @@ class MessageParser:
         else:
             # print(f"WARNING: Unknown message type {message_type}")
             return values
+        
         length, types, type_info = message_schema
         if len(values) < length:
             print(f"Cannot cast {len(values)} values to {length} types")
@@ -28,10 +29,9 @@ class MessageParser:
                 elif types[i] is str:
                     casted.append(str(values[i], type_info[i]))
                 elif types[i] is bytes:
-                    casted.append(values[i])
+                    casted.append(bytes.fromhex(values[i]))
             except TypeError:
                 print(f"Cannot cast {values[i]} to {types[i]}")
-
                 return -1
         return casted
         
@@ -69,7 +69,7 @@ class MessageParser:
             message += values_as_bytes[-1]
         return message
 
-    def parse_message(self, data: bytes) -> tuple:
+    def parse_message(self, data: bytes) -> tuple[str, str, list]:
         try:
             if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$'), data.decode()) is None:
                 print("invalid format")

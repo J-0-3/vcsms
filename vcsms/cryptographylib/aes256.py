@@ -101,7 +101,6 @@ def combine_byte_array(byte_array: list) -> int:
     word = 0
     for i in range(len(byte_array)):
         word |= byte_array[i] << 8 * (len(byte_array)- 1 - i)
-
     return word
 
 
@@ -173,6 +172,7 @@ for i in range(256):
     for j in range(256):
         row.append(gf_multiply_bytes(i, j))
     multiply_lookup.append(row)
+    
 def transpose_matrix(m: list) -> list:
     """Transpose a column/row major 4x4 matrix to row/column major. 
 

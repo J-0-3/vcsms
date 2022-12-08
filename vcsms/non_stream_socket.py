@@ -11,7 +11,7 @@ class NonStreamSocket:
         self.incoming_in_progress = b''
         self.outgoing_in_progress = b''
         self.open = False
-
+    
     def __in_thread(self):
         while open:
             try:
