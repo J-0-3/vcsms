@@ -1,9 +1,7 @@
-import json
 import threading
-import sys
 import os
-import re
 import random
+from typing import Union
 from queue import Queue
 
 from .cryptographylib import dhke, sha256, aes256
@@ -94,6 +92,7 @@ class Client:
         
     def run(self):
         os.makedirs(os.path.join(self.app_dir, "messages"), exist_ok=True)
+        os.makedirs(os.path.join(self.app_dir, "keys"), exist_ok=True)
         db = self.db_connect()
         db.setup()
         db.close()
@@ -136,23 +135,29 @@ class Client:
     # message type handlers
 
     def handler_key_found(self, _, values: list) -> None:
-        self.client_pubkeys[values[0]] = (values[1], values[2])
+        db = self.db_connect()
+        db.save_key(values[0], (values[1], values[2]))
+        db.close()
     
     def handler_key_not_found(self, _, values: list) -> None:
         print(f"Server could not locate public key for {values[0]}")
     
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
+        
         message_index, sender_dh_pub, sender_dh_sig = values
-
+        db = self.db_connect()
         if message_index in self.messages:
+            db.close()
             return "IndexInUse", (message_index, )
 
-        if sender not in self.client_pubkeys:
+        if not db.user_known(sender):
+            db.close()
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
             return "ResendAuthPacket", (message_index, )
         
         signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
-        if not signing.verify(signature_data, sender_dh_sig, self.client_pubkeys[sender]):
+        if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+            db.close()
             return "InvalidSignature", (message_index, )
 
         dh_priv = random.randrange(1, self.dhke_group[1])
@@ -165,15 +170,20 @@ class Client:
 
     def handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index, sender_dh_pub, sender_dh_sig = values
+
         if message_index not in self.messages:
             return "NoSuchIndex", (message_index, )
-        if sender not in self.client_pubkeys:
+        db = self.db_connect()
+        if not db.user_known(sender):
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
+            db.close()
             return "ResendAuthPacket", (message_index, )
         
         signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
-        if not signing.verify(signature_data, sender_dh_sig, self.client_pubkeys[sender]):
+        if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+            db.close()
             return "InvalidSignature", (message_index, )
+        db.close()
 
         dh_priv = self.messages[message_index]["dh_private"]
         shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
@@ -187,11 +197,10 @@ class Client:
     def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple]|None:
         message_index, aes_iv, ciphertext = values
         if message_index not in self.messages:
-            return "NoSuchIndex", (values[0], )
-        ciphertext = bytes.fromhex(values[2])
-        encryption_key = self.messages[values[0]]["encryption_key"]
-        plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, values[1])
-        self.messages.pop(values[0])
+            return "NoSuchIndex", (message_index, )
+        encryption_key = self.messages[message_index]["encryption_key"]
+        plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
+        self.messages.pop(message_index)
         db = self.db_connect()
         db.insert_message(sender, plaintext.decode())
         nickname = db.get_nickname(sender)
@@ -220,5 +229,5 @@ class Client:
                 return "NewMessage", (values[0], dh_public, dh_signature)  
 
     def db_connect(self):
-        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/")
+        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/", os.path.join(self.app_dir, "keys") + "/")
         return db

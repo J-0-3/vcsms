@@ -125,15 +125,19 @@ class Server:
                 iv, ciphertext = raw.decode().split(':', 1)
                 iv = int(iv, 16)
                 data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, iv)
-                recipient, message_type, message_values = self.message_parser.parse_message(data)
-                if recipient == "0":
-                    response = self.message_parser.handle(id, message_type, message_values)
-                    if response:
-                        self.send(id, response)
-                else:
-                    to_send = self.message_parser.construct_message(id, message_type, *message_values)
-                    self.send(recipient, to_send)
-                    
+                try:
+                    recipient, message_type, message_values = self.message_parser.parse_message(data)
+
+                    if recipient == "0":
+                        response = self.message_parser.handle(id, message_type, message_values)
+                        if response:
+                            self.send(id, response)
+                    else:
+                        to_send = self.message_parser.construct_message(id, message_type, *message_values)
+                        self.send(recipient, to_send)
+                except:
+                    pass
+                
     def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while True:
             message = outbox.get()
