@@ -29,7 +29,7 @@ class MessageParser:
                 elif types[i] is str:
                     casted.append(str(values[i], type_info[i]))
                 elif types[i] is bytes:
-                    casted.append(bytes.fromhex(values[i]))
+                    casted.append(bytes.fromhex(values[i].decode('utf-8')))
             except TypeError:
                 print(f"Cannot cast {values[i]} to {types[i]}")
                 return -1
@@ -45,7 +45,7 @@ class MessageParser:
             values_as_bytes = []
             for i in range(length):
                 if type(values[i]) is not types[i]:
-                    print(f"Invalid value for {types[i]}: {values[i]} ({type(values[i])}) while process {message_type}")
+                    print(f"Invalid value for {types[i]}: {values[i]} ({type(values[i])}) while processing {message_type}")
                     return b''
 
                 if types[i] is int:
@@ -56,7 +56,7 @@ class MessageParser:
                 elif types[i] is str:
                         values_as_bytes.append(values[i].encode(type_info[i]))
                 elif types[i] is bytes:
-                        values_as_bytes.append(values[i])
+                        values_as_bytes.append(values[i].hex().encode('utf-8'))
         else:
             # print(f"WARNING: unknown outgoing message type: {message_type}")
             values_as_bytes = values

@@ -26,28 +26,31 @@ class ServerConnection:
     def __handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
-
-        server_exp, server_mod = self.socket.recv().split(b':')
-        self.public_key = (int(server_exp, 16), int(server_mod, 16))
+        try:
+            server_exp, server_mod = self.socket.recv().split(b':')
+            self.public_key = (int(server_exp, 16), int(server_mod, 16))
+        except:
+            self.socket.send(b"MalformedIdentityPacket")
+            self.socket.close()
+            raise Exception("server sent a malformed identity packet")
         if keys.fingerprint(self.public_key) != self.fp and not skip_fp_verify:
+            self.socket.send(b"PubKeyIdMismatch")
             self.socket.close()
             raise Exception("server fingerprint mismatch. possible mitm detected, aborting...")
 
-        pub_key_hash = hex(sha256.hash(pub_exp + pub_mod))[2:].encode()
+        pub_key_hash = keys.fingerprint(pub_key).encode()
         self.socket.send(pub_key_hash + b":" + pub_exp + b":" + pub_mod)
 
         dhke_priv = random.randrange(1, dhke_group[1])
-        dhke_pub = hex(dhke.generate_public_key(dhke_priv, dhke_group))[2:].encode()
-        dhke_pub_sig = signing.sign(dhke_pub, priv_key)
+        dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, priv_key, dhke_group)
 
         s_dhke_pub, s_dhke_pub_sig = self.socket.recv().split(b':')
-
         if not signing.verify(s_dhke_pub, s_dhke_pub_sig, self.public_key):
-            self.socket.send(b"SIGNATURE VERIFICATION FAILED")
+            self.socket.send(b"BadSignature")
             self.socket.close()
             raise Exception("Signature verification failed")
 
-        self.socket.send(dhke_pub + b":" + dhke_pub_sig)
+        self.socket.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self.encryption_key = sha256.hash(utils.i_to_b(shared_key))

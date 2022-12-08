@@ -75,42 +75,45 @@ class Server:
         pub_exp = hex(self.pub[0])[2:].encode()
         pub_mod = hex(self.pub[1])[2:].encode()
         client.send(pub_exp + b':' + pub_mod)
-        auth_packet = client.recv()
-        c_id, c_exp, c_mod = auth_packet.split(b':')
-        c_id = c_id.decode()
+        identity_packet = client.recv()
+        try:
+            c_id, c_exp, c_mod = identity_packet.split(b':')
+            c_id = c_id.decode()
+        except:
+            print("Connection failure. Invalid identity packet.")
+            client.send(b"MalformedIdentityPacket")
+            client.close()
+            return
         print(f"Client ID is {c_id}")
         client_pubkey = (int(c_exp, 16), int(c_mod, 16))
         if keys.fingerprint(client_pubkey) != c_id:
             print(f"Public Key Validation Failed")
-            client.send(b"PUBLIC KEY VALIDATION FAILED")
+            client.send(b"PubKeyIdMismatch")
             client.close()
             return
 
-        db = self.db_connect()
-        db.user_login(c_id, client_pubkey)
-        db.close()
-
         dhke_priv = random.randrange(1, self.dhke_group[1])
-        dhke_pub = hex(dhke.generate_public_key(dhke_priv, self.dhke_group))[2:].encode()
-        dhke_pub_sig = signing.sign(dhke_pub, self.priv)
-        client.send(dhke_pub + b":" + dhke_pub_sig)
+        dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, self.priv, self.dhke_group)
+        client.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
 
         c_dhke_pub, c_dhke_pub_sig = client.recv().split(b':')
-
         if not signing.verify(c_dhke_pub, c_dhke_pub_sig, client_pubkey):
-            client.send(b"SIGNATURE VERIFICATION FAILED")
+            client.send(b"BadSignature")
             client.close()
             return
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(c_dhke_pub, 16), self.dhke_group)
         encryption_key = sha256.hash(utils.i_to_b(shared_key))
         if c_id in self.client_outboxes:
-            print("Returning user!")
             outbox = self.client_outboxes[c_id]
         else:
             outbox = Queue()
             self.client_outboxes[c_id] = outbox
+        
         self.clients_connected[c_id] = True
+        db = self.db_connect()
+        db.user_login(c_id, client_pubkey)
+        db.close()
         t_in = threading.Thread(target=self.in_thread, args=(client, encryption_key, c_id))
         t_out = threading.Thread(target=self.out_thread, args=(client, outbox, encryption_key))
         t_in.start()
@@ -120,14 +123,13 @@ class Server:
     def in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
         while self.clients_connected[id]:
             if client.new():
-                print(f"New message from {id}")
                 raw = client.recv()
                 iv, ciphertext = raw.decode().split(':', 1)
                 iv = int(iv, 16)
                 data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, iv)
                 try:
                     recipient, message_type, message_values = self.message_parser.parse_message(data)
-
+                    print(f"{message_type} {id} -> {recipient}")
                     if recipient == "0":
                         response = self.message_parser.handle(id, message_type, message_values)
                         if response:
@@ -136,8 +138,7 @@ class Server:
                         to_send = self.message_parser.construct_message(id, message_type, *message_values)
                         self.send(recipient, to_send)
                 except:
-                    pass
-                
+                    print("failed to parse message") 
     def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while True:
             message = outbox.get()
@@ -145,7 +146,7 @@ class Server:
                 sock.send(b'CLOSE')
                 break
             aes_iv = random.randrange(1, 2 ** 128)
-            encrypted_message = hex(int.from_bytes(aes256.encrypt_cbc(message, encryption_key, aes_iv), 'big')).encode()
+            encrypted_message = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex().encode('utf-8')
             sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
         sock.close()
 

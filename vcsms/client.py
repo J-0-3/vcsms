@@ -16,7 +16,7 @@ INCOMING_MESSAGE_TYPES = {
         # type       argc arg types         additional type info (encoding, base, etc)
         "NewMessage": (3, [int, int, bytes], [10, 16]),
         "MessageAccept": (3, [int, int, bytes], [10, 16]),
-        "MessageData": (3, [int, int, str], [10, 16, 'utf-8']),
+        "MessageData": (3, [int, int, bytes], [10, 16, 'utf-8']),
         "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
         "KeyNotFound": (1, [str], ['utf-8']),
         "IndexInUse": (1, [int], [10]),
@@ -28,7 +28,7 @@ INCOMING_MESSAGE_TYPES = {
 OUTGOING_MESSAGE_TYPES = {
         "NewMessage": (3, [int, int, bytes], [10, 16]),
         "MessageAccept": (3, [int, int, bytes], [10, 16]),
-        "MessageData": (3, [int, int, str], [10, 16, 'utf-8']),
+        "MessageData": (3, [int, int, bytes], [10, 16, 'utf-8']),
         "IndexInUse": (1, [int], [10]),
         "InvalidSignature": (1, [int], [10]),
         "NoSuchIndex": (1, [int], [10]),
@@ -136,6 +136,7 @@ class Client:
 
     def handler_key_found(self, _, values: list) -> None:
         db = self.db_connect()
+        print(f"saving key: {values})")
         db.save_key(values[0], (values[1], values[2]))
         db.close()
     
@@ -143,8 +144,8 @@ class Client:
         print(f"Server could not locate public key for {values[0]}")
     
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
-        
         message_index, sender_dh_pub, sender_dh_sig = values
+
         db = self.db_connect()
         if message_index in self.messages:
             db.close()
@@ -161,7 +162,7 @@ class Client:
             return "InvalidSignature", (message_index, )
 
         dh_priv = random.randrange(1, self.dhke_group[1])
-        dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group)
+        dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, message_index)
         shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
         
@@ -192,7 +193,7 @@ class Client:
         aes_iv = random.randrange(2, 2 ** 128)
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
         self.messages.pop(message_index)
-        return "MessageData", (message_index, aes_iv, ciphertext.hex())
+        return "MessageData", (message_index, aes_iv, ciphertext)
     
     def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple]|None:
         message_index, aes_iv, ciphertext = values
@@ -211,22 +212,24 @@ class Client:
             self.message_queue.put((nickname, plaintext.decode()))
             
     def handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
-            message = self.messages[values[0]]
-            new_id = random.randrange(1, 2 ** 64)
-            self.messages.pop(values[0])
-            self.messages[new_id] = message
-            dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group)
-            return "NewMessage", (new_id, dh_public, dh_signature)
+        message_index = values[0]    
+        message = self.messages[message_index]
+        new_id = random.randrange(1, 2 ** 64)
+        self.messages.pop(message_index)
+        self.messages[new_id] = message
+        dh_private = message["dh_private"]
+        dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, new_id)
+        return "NewMessage", (new_id, dh_public, dh_signature)
         
     def handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
-            message = self.messages[values[0]]
-            dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group)
-            if message["encryption_key"]:
-                return "MessageAccept", (values[0], dh_public, dh_signature)
-            else:
-                return "NewMessage", (values[0], dh_public, dh_signature)  
+        message_index = values[0]
+        message = self.messages[message_index]
+        dh_private = message["dh_private"]
+        dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, message_index)
+        if message["encryption_key"]:
+            return "MessageAccept", (message_index, dh_public, dh_signature)
+        else:
+            return "NewMessage", (message_index, dh_public, dh_signature)  
 
     def db_connect(self):
         db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/", os.path.join(self.app_dir, "keys") + "/")
