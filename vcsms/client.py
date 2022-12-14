@@ -71,6 +71,12 @@ class Client:
         db = self.db_connect()
         db.set_nickname(id, nickname)
         db.close()
+    
+    def get_contacts(self) -> list:
+        db = self.db_connect()
+        contacts = db.get_users()
+        db.close()
+        return contacts
 
     def send(self, recipient: str, message: bytes):
         db = self.db_connect()
@@ -104,7 +110,6 @@ class Client:
 
         self.server = ServerConnection(self.ip, self.port, self.fingerprint)
         self.server.connect(self.pub, self.priv, skip_fp_verify=False)
-        print(f"I AM {keys.fingerprint(self.pub)}")
         self.running = True
 
         t_incoming = threading.Thread(target=self.incoming_thread, args=())
@@ -114,6 +119,9 @@ class Client:
         self.server.send(self.message_parser.construct_message("0", "Quit"))
         self.running = False
 
+    def get_id(self) -> str:
+        return keys.fingerprint(self.pub)
+
     # methods for threads
     def incoming_thread(self):
         while self.running:
@@ -121,12 +129,11 @@ class Client:
                 msg = self.server.read()
                 t_process = threading.Thread(target=self.msg_process_thread, args=(msg,))
                 t_process.start()    
-    
+   
     def msg_process_thread(self, data: bytes):
         try:
             sender, message_type, message_values = self.message_parser.parse_message(data)
         except:
-            print("Could not parse message")
             return
         response = self.message_parser.handle(sender, message_type, message_values)
         if response:
@@ -136,7 +143,6 @@ class Client:
 
     def handler_key_found(self, _, values: list) -> None:
         db = self.db_connect()
-        print(f"saving key: {values})")
         db.save_key(values[0], (values[1], values[2]))
         db.close()
     

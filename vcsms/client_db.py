@@ -101,4 +101,9 @@ class Client_DB:
 
     def get_key(self, id: str) -> tuple[int, int]:
         return keys.load_key(self.key_file_prefix + id)
-    
+   
+    def get_users(self) -> list[str]:
+        cursor = self.db.cursor()
+        cursor.execute("SELECT nickname FROM nicknames")
+        nicknames = [row[0] for row in cursor.readall()]
+        return nicknames
