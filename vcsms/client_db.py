@@ -105,5 +105,5 @@ class Client_DB:
     def get_users(self) -> list[str]:
         cursor = self.db.cursor()
         cursor.execute("SELECT nickname FROM nicknames")
-        nicknames = [row[0] for row in cursor.readall()]
+        nicknames = [row[0] for row in cursor.fetchall()]
         return nicknames

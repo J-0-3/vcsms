@@ -35,7 +35,7 @@ class Server:
         self.in_queue = Queue()
         self.out_queue = Queue()
         self.client_outboxes = {}
-        self.clients_connected = {}
+        self.sockets = {}
         self.db_path = db_path
         self.pubkey_path = pubkey_directory
         response_map = {
@@ -110,7 +110,7 @@ class Server:
             outbox = Queue()
             self.client_outboxes[c_id] = outbox
         
-        self.clients_connected[c_id] = True
+        self.sockets[c_id] = client
         db = self.db_connect()
         db.user_login(c_id, client_pubkey)
         db.close()
@@ -121,7 +121,7 @@ class Server:
 
     # thread methods
     def in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
-        while self.clients_connected[id]:
+        while client.connected():
             if client.new():
                 raw = client.recv()
                 iv, ciphertext = raw.decode().split(':', 1)
@@ -139,16 +139,22 @@ class Server:
                         self.send(recipient, to_send)
                 except:
                     print("failed to parse message") 
+                    print(data)
+
+        db = self.db_connect()
+        db.user_logout(id)
+        db.close()
+        print(f"User: {id} closed the connection")
+        self.sockets.pop(id)
+
     def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
-        while True:
-            message = outbox.get()
-            if message == b'CLOSE':
-                sock.send(b'CLOSE')
-                break
-            aes_iv = random.randrange(1, 2 ** 128)
-            encrypted_message = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex().encode('utf-8')
-            sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
-        sock.close()
+        while sock.connected():
+            if not outbox.empty():
+                message = outbox.get()
+                aes_iv = random.randrange(1, 2 ** 128)
+                encrypted_message = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex().encode('utf-8')
+                sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
+        
 
     # message type handler methods
     def handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -163,12 +169,7 @@ class Server:
             return "KeyNotFound", (values[0], )
     
     def handler_quit(self, sender: str, _: list):
-        self.clients_connected[sender] = False
-        db = self.db_connect()
-        db.user_logout(sender)
-        db.close()
-        print(f"User: {sender} closed the connection")
-        self.client_outboxes[sender].put(b'CLOSE')
+        self.sockets[sender].close()
     
     def db_connect(self) -> Server_DB:
         db = Server_DB(self.db_path, self.pubkey_path)

@@ -1,5 +1,6 @@
 import socket
 import threading
+import time
 from queue import Queue
 
 
@@ -12,10 +13,22 @@ class NonStreamSocket:
         self.outgoing_in_progress = b''
         self.open = False
     
+    def __checklife_thread(self):
+        while self.open:
+            time.sleep(1)
+            try:
+                self.sock.sendall(b'alive?')
+            except OSError:
+                self.open = False
+                break
+
     def __in_thread(self):
-        while open:
+        while self.open:
             try:
                 data = self.sock.recv(self.block_size)
+            except OSError:
+                break
+            if data != b'alive?':
                 for c in data:
                     byte = c.to_bytes(1, 'big')
                     if byte == b'\xff':
@@ -23,8 +36,6 @@ class NonStreamSocket:
                         self.incoming_in_progress = b''
                     else:
                         self.incoming_in_progress += byte
-            except OSError as e:
-                break
 
     def connect(self, addr: str, port: int):
         self.sock.connect((addr, port))
@@ -34,8 +45,11 @@ class NonStreamSocket:
         self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
 
+    def connected(self):
+        return self.open
+
     def send(self, data: bytes):
-        self.sock.send(data + b'\xff')
+        self.sock.sendall(data + b'\xff')
 
     def recv(self) -> bytes:
         return self.queue.get()
@@ -45,5 +59,8 @@ class NonStreamSocket:
 
     def listen(self):
         t_in = threading.Thread(target=self.__in_thread, args=())
-        t_in.start()
+        t_life = threading.Thread(target=self.__checklife_thread, args=())
         self.open = True
+        t_in.start()
+        t_life.start()
+

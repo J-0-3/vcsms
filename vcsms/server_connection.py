@@ -1,6 +1,7 @@
 import socket
 import random
 import threading
+import time
 from queue import Queue
 
 from . import keys
@@ -22,6 +23,7 @@ class ServerConnection:
         self.in_queue = Queue()
         self.out_queue = Queue()
         self.connected = False
+        self.busy = False
 
     def __handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
         pub_exp = hex(pub_key[0])[2:].encode()
@@ -67,23 +69,29 @@ class ServerConnection:
 
     def __in_thread(self):
         while self.connected:        
-            data = self.socket.recv()
-            if data == b'CLOSE':
-                self.connected = False
-                self.socket.close()
-                break
-            iv, data = data.split(b':')
-            iv = int(iv, 16)
-            message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self.encryption_key, iv)
-            self.in_queue.put(message)
+            if self.socket.new():
+                data = self.socket.recv()
+                iv, data = data.split(b':')
+                iv = int(iv, 16)
+                message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self.encryption_key, iv)
+                self.in_queue.put(message)
     
     def __out_thread(self):
         while self.connected:
             if not self.out_queue.empty():
+                self.busy = True
                 message = self.out_queue.get()
                 iv = random.randrange(1, 2 ** 128)
                 encrypted = aes256.encrypt_cbc(message, self.encryption_key, iv)
                 self.socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
+                self.busy = False
+
+    def close(self):
+        while True:
+            if self.out_queue.empty() and not self.busy:
+                self.connected = False
+                self.socket.close()
+                break
 
     def send(self, data: bytes):
         self.out_queue.put(data)

@@ -1,6 +1,7 @@
 import threading
 import os
 import random
+import re
 from typing import Union
 from queue import Queue
 
@@ -69,8 +70,13 @@ class Client:
     
     def add_contact(self, nickname: str, id: str):
         db = self.db_connect()
-        db.set_nickname(id, nickname)
-        db.close()
+        id = id.strip().lower()
+        if re.fullmatch(re.compile('^[0-9a-f]{64}$'), id) is not None:
+            db.set_nickname(id, nickname)
+            db.close()
+        else:
+            print('invalid id format')
+            db.close()
     
     def get_contacts(self) -> list:
         db = self.db_connect()
@@ -118,6 +124,7 @@ class Client:
     def quit(self):
         self.server.send(self.message_parser.construct_message("0", "Quit"))
         self.running = False
+        self.server.close()
 
     def get_id(self) -> str:
         return keys.fingerprint(self.pub)
