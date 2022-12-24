@@ -1,8 +1,10 @@
 from vcsms.client import Client
+from vcsms.logger import Logger
 import curses
 import curses.textpad
 import argparse
 import json
+import os
 
 class Application:
     def __init__(self, client: Client):
@@ -103,7 +105,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with open(args.config, 'r') as conf:
         serverconf = json.loads(conf.read())
-    client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory)
+    logger = Logger(5, os.path.join(args.directory, "log.txt"))
+    client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, logger)
     client.run()
     application = Application(client)
     curses.wrapper(application.main)

@@ -1,5 +1,6 @@
 import math
 from .utils import get_msb, i_to_b
+from .exceptions import *
 
 s_box = [[0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76],
         [0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0],
@@ -580,7 +581,7 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes(data, 'big')
+    data_as_int = int.from_bytes(b'AES' + data, 'big')
     message_blocks = split_blocks(data_as_int) # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
@@ -629,5 +630,9 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     for block in message_blocks:
         message |= (block << shift)
         shift -= 128
-        
-    return i_to_b(message)
+    
+    plaintext = i_to_b(message)
+    if plaintext[:3] == b'AES':
+        return plaintext[3:] 
+    else:
+        raise DecryptionFailureException(key)

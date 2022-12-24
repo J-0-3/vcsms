@@ -1,6 +1,5 @@
 import re
-
-
+from .exceptions.message_parser import *
 class MessageParser:
     def __init__(self, incoming_message_types: dict, outgoing_message_types: dict, response_map: dict = {}):
         self.incoming = incoming_message_types
@@ -17,10 +16,7 @@ class MessageParser:
         
         length, types, type_info = message_schema
         if len(values) < length:
-            print(f"Cannot cast {len(values)} values to {length} types")
-            print(values)
-            print(message_schema)
-            return -1
+            raise ParameterCountException(values, length, message_type)
         casted = []
         for i in range(len(values)):
             try:
@@ -31,8 +27,7 @@ class MessageParser:
                 elif types[i] is bytes:
                     casted.append(bytes.fromhex(values[i].decode('utf-8')))
             except TypeError:
-                print(f"Cannot cast {values[i]} to {types[i]}")
-                return -1
+                raise ParameterImpossibleTypeCastException(values[i], types[i], message_type)
         return casted
         
     def construct_message(self,recipient: str, message_type: str, *values) -> bytes:
@@ -40,13 +35,12 @@ class MessageParser:
             message_schema = self.outgoing[message_type]
             length, types, type_info = message_schema
             if len(values) != length:
-                print(f"Invalid number of values for message type {message_type}")
+                raise ParameterCountException(values, length, message_type)
 
             values_as_bytes = []
             for i in range(length):
                 if type(values[i]) is not types[i]:
-                    print(f"Invalid value for {types[i]}: {values[i]} ({type(values[i])}) while processing {message_type}")
-                    return b''
+                    raise ParameterWrongTypeException(values[i], types[i], message_type)
 
                 if types[i] is int:
                     if type_info[i] == 10:
@@ -70,10 +64,8 @@ class MessageParser:
         return message
 
     def parse_message(self, data: bytes) -> tuple[str, str, list]:
-        try:
-            if re.fullmatch(re.compile('^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$'), data.decode()) is None:
-                print("invalid format")
-                return ()
+            if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
+                raise MalformedMessageException(data)
             sender, message_type, payload = data.split(b':', 2)
             sender = sender.decode('utf-8')
             message_type = message_type.decode('utf-8')
@@ -82,12 +74,7 @@ class MessageParser:
                 message_values = self.interpret_message_values(payload.split(b':'), message_type)
             else:
                 message_values = []
-            if message_values == -1:
-                return ()
             return sender, message_type, message_values
-        except Exception as e:
-            print(f"Error parsing message data: {e}")
-            return ()
 
     def handle(self, sender: str, message_type: str, values: list) -> bytes:
         """Handle the message using the handler function given in the response map and return the response.

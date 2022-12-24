@@ -10,9 +10,11 @@ from queue import Queue
 from . import  keys
 from . import signing
 from .server_db import Server_DB
+from .logger import Logger
 from .cryptographylib import dhke, sha256, aes256, utils
 from .non_stream_socket import NonStreamSocket
 from .message_parser import MessageParser
+from .exceptions.message_parser import *
 
 INCOMING_MESSAGE_TYPES = {
     "GetKey": (1,[str],['utf-8']),
@@ -24,7 +26,7 @@ OUTGOING_MESSAGE_TYPES = {
     "KeyNotFound": (1, [str], ['utf-8']) 
 }
 class Server:
-    def __init__(self, addr: str, port: int, keypair: tuple, db_path: str, pubkey_directory: str):
+    def __init__(self, addr: str, port: int, keypair: tuple, db_path: str, pubkey_directory: str, logger: Logger):
         self.addr = addr
         self.port = port
         self.pub = keypair[0]
@@ -38,6 +40,7 @@ class Server:
         self.sockets = {}
         self.db_path = db_path
         self.pubkey_path = pubkey_directory
+        self.logger = logger
         response_map = {
             "GetKey": self.handler_get_key,
             "Quit": self.handler_quit
@@ -52,10 +55,11 @@ class Server:
         db.setup_db()
         db.close()
 
-        print(f"Running on {self.addr}:{self.port}...")
+        self.logger.log(f"Running on {self.addr}:{self.port}", 0)
+
         while True:
             conn, addr = self.sock.accept()
-            print(f"New connection from: {addr}")
+            self.logger.log(f"New connection from: {addr}", 2)
             ns_sock = NonStreamSocket(conn)
             ns_sock.listen()
             t_connect = threading.Thread(target=self.connect, args=(ns_sock,))
@@ -67,7 +71,7 @@ class Server:
 
     def send(self, client: str, message: bytes):
         if client not in self.client_outboxes:
-            print("Message sent to unknown user.")
+            self.logger.log("Message to offline/unknown user {client}", 3)
             self.client_outboxes[client] = Queue()
         self.client_outboxes[client].put(message)
     
@@ -80,14 +84,14 @@ class Server:
             c_id, c_exp, c_mod = identity_packet.split(b':')
             c_id = c_id.decode()
         except:
-            print("Connection failure. Invalid identity packet.")
+            self.logger.log("Connection failure. Malformed identity packet.", 1)
             client.send(b"MalformedIdentityPacket")
             client.close()
             return
-        print(f"Client ID is {c_id}")
+        self.logger.log(f"Client ID is {c_id}", 2)
         client_pubkey = (int(c_exp, 16), int(c_mod, 16))
         if keys.fingerprint(client_pubkey) != c_id:
-            print(f"Public Key Validation Failed")
+            self.logger.log(f"Connection failure. Public key validation failed for {c_id}", 1)
             client.send(b"PubKeyIdMismatch")
             client.close()
             return
@@ -98,6 +102,7 @@ class Server:
 
         c_dhke_pub, c_dhke_pub_sig = client.recv().split(b':')
         if not signing.verify(c_dhke_pub, c_dhke_pub_sig, client_pubkey):
+            self.logger.log(f"Connection failure. Bad signature from {c_id}", 1)
             client.send(b"BadSignature")
             client.close()
             return
@@ -114,6 +119,7 @@ class Server:
         db = self.db_connect()
         db.user_login(c_id, client_pubkey)
         db.close()
+        self.logger.log(f"User {c_id} successfully authenticated", 1)
         t_in = threading.Thread(target=self.in_thread, args=(client, encryption_key, c_id))
         t_out = threading.Thread(target=self.out_thread, args=(client, outbox, encryption_key))
         t_in.start()
@@ -124,27 +130,36 @@ class Server:
         while client.connected():
             if client.new():
                 raw = client.recv()
-                iv, ciphertext = raw.decode().split(':', 1)
-                iv = int(iv, 16)
+                try:
+                    iv, ciphertext = raw.decode().split(':', 1)
+                except:
+                    self.logger.log(f"Malformed message from {id}", 2)
+                    return
+                try:
+                    iv = int(iv, 16)
+                except:
+                    self.logger.log(f"Invalid initialization vector {iv}", 2)
+                    return
                 data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, iv)
                 try:
                     recipient, message_type, message_values = self.message_parser.parse_message(data)
-                    print(f"{message_type} {id} -> {recipient}")
-                    if recipient == "0":
-                        response = self.message_parser.handle(id, message_type, message_values)
-                        if response:
-                            self.send(id, response)
-                    else:
-                        to_send = self.message_parser.construct_message(id, message_type, *message_values)
-                        self.send(recipient, to_send)
-                except:
-                    print("failed to parse message") 
-                    print(data)
+                except MessageParseException as e:
+                    self.logger.log(str(e), 2)
+                    return
+
+                self.logger.log(f"{message_type} {id} -> {recipient}", 3)
+                if recipient == "0":
+                    response = self.message_parser.handle(id, message_type, message_values)
+                    if response:
+                        self.send(id, response)
+                else:
+                    to_send = self.message_parser.construct_message(id, message_type, *message_values)
+                    self.send(recipient, to_send)
 
         db = self.db_connect()
         db.user_logout(id)
         db.close()
-        print(f"User: {id} closed the connection")
+        self.logger.log(f"User {id} closed the connection", 1)
         self.sockets.pop(id)
 
     def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
@@ -158,17 +173,22 @@ class Server:
 
     # message type handler methods
     def handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
-        print(f"Key request for {values[0]}")
+        target = values[0]
+
+        self.logger.log(f"User {sender} requested key for user {target}", 3) 
         db = self.db_connect()
-        if db.user_known(values[0]):
-            key = db.get_pubkey(values[0])
+        if db.user_known(target):
+            self.logger.log(f"Key found for user {target}", 3)
+            key = db.get_pubkey(target)
             db.close()
-            return "KeyFound", (values[0], *key)
+            return "KeyFound", (target, *key)
         else:
+            self.logger.log(f"Key not found for user {target}", 3)
             db.close()
-            return "KeyNotFound", (values[0], )
+            return "KeyNotFound", (target, )
     
     def handler_quit(self, sender: str, _: list):
+        self.logger.log(f"User {sender} requested a logout", 1)
         self.sockets[sender].close()
     
     def db_connect(self) -> Server_DB:

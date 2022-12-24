@@ -3,6 +3,7 @@ import os
 import json
 
 from vcsms.server import Server
+from vcsms.logger import Logger
 from vcsms import keys
 
 if __name__ == "__main__":
@@ -33,5 +34,7 @@ if __name__ == "__main__":
                 "port": config["port"],
                 "fingerprint": keys.fingerprint(pub)
             }))
-    server = Server(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"))
+
+    logger = Logger(5, os.path.join(server_directory, "log.txt"))
+    server = Server(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"), logger)
     server.run()

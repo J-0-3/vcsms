@@ -7,17 +7,20 @@ from queue import Queue
 from . import keys
 from . import signing
 from .non_stream_socket import NonStreamSocket
+from .logger import Logger
 from .cryptographylib import dhke, sha256, utils, aes256
-
+from .cryptographylib.exceptions import *
+from .exceptions.server_connection import *
 
 class ServerConnection:
-    def __init__(self, ip: str, port: int, fp: str):
+    def __init__(self, ip: str, port: int, fp: str, logger: Logger):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket = NonStreamSocket(s)
         self.ip = ip
         self.port = port
         self.fp = fp
+        self.logger = logger
         self.encryption_key = 0
         self.public_key = (0, 0)
         self.in_queue = Queue()
@@ -25,32 +28,39 @@ class ServerConnection:
         self.connected = False
         self.busy = False
 
-    def __handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
+    def handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
+        
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
         try:
             server_exp, server_mod = self.socket.recv().split(b':')
             self.public_key = (int(server_exp, 16), int(server_mod, 16))
         except:
-            self.socket.send(b"MalformedIdentityPacket")
+            self.socket.send(b"MalformedPacket")
             self.socket.close()
-            raise Exception("server sent a malformed identity packet")
+            raise MalformedPacketException()
         if keys.fingerprint(self.public_key) != self.fp and not skip_fp_verify:
             self.socket.send(b"PubKeyIdMismatch")
             self.socket.close()
-            raise Exception("server fingerprint mismatch. possible mitm detected, aborting...")
+            raise PublicKeyIdMismatchException(keys.fingerprint(self.public_key), self.fp)
 
         pub_key_hash = keys.fingerprint(pub_key).encode()
         self.socket.send(pub_key_hash + b":" + pub_exp + b":" + pub_mod)
 
         dhke_priv = random.randrange(1, dhke_group[1])
         dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, priv_key, dhke_group)
+        
+        try:
+            s_dhke_pub, s_dhke_pub_sig = self.socket.recv().split(b':')
+        except:
+            self.socket.send(b"MalformedPacket")
+            self.socket.close()
+            raise MalformedPacketException()
 
-        s_dhke_pub, s_dhke_pub_sig = self.socket.recv().split(b':')
         if not signing.verify(s_dhke_pub, s_dhke_pub_sig, self.public_key):
             self.socket.send(b"BadSignature")
             self.socket.close()
-            raise Exception("Signature verification failed")
+            raise SignatureVerifyFailureException(s_dhke_pub_sig)
 
         self.socket.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
 
@@ -61,7 +71,7 @@ class ServerConnection:
         self.connected = True
         self.socket.connect(self.ip, self.port)
         self.socket.listen()
-        self.__handshake(pub_key, priv_key, dhke.group14_2048, skip_fp_verify)
+        self.handshake(pub_key, priv_key, dhke.group14_2048, skip_fp_verify)
         t_in = threading.Thread(target=self.__in_thread, args=())
         t_out = threading.Thread(target=self.__out_thread, args=())
         t_in.start()
@@ -71,9 +81,21 @@ class ServerConnection:
         while self.connected:        
             if self.socket.new():
                 data = self.socket.recv()
-                iv, data = data.split(b':')
-                iv = int(iv, 16)
-                message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self.encryption_key, iv)
+                try:
+                    iv, data = data.split(b':')
+                except:
+                    self.logger.log("Server sent a malformed packet", 2)
+                    continue
+                try:
+                    iv = int(iv, 16)
+                except:
+                    self.logger.log("Server sent an invalid initialisation vector", 2)
+                    continue
+                try:
+                    message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self.encryption_key, iv)
+                except DecryptionFailureException:
+                    self.logger.log("Failed to decrypt message from server", 2)
+                    continue
                 self.in_queue.put(message)
     
     def __out_thread(self):
@@ -87,10 +109,13 @@ class ServerConnection:
                 self.busy = False
 
     def close(self):
+        self.logger.log("Trying to close connection to server", 3)
         while True:
             if self.out_queue.empty() and not self.busy:
+                self.logger.log("Able to close connection", 3)
                 self.connected = False
                 self.socket.close()
+                self.logger.log("Closed connection to server", 2)
                 break
 
     def send(self, data: bytes):
