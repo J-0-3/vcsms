@@ -52,7 +52,7 @@ def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
     # always be 0 as (a * phi) is a multiple of phi. This gives (d * e) mod phi + 0 = 1 mod phi.
     # 1 mod phi = 1 therefore we are left with d such that (d * e) mod phi = 1
 
-    gcd, d, null = gcd_extended_euclid(e, phi)
+    gcd, d, _ = gcd_extended_euclid(e, phi)
     d %= phi  # this is to eliminate the possibility of negative values for d
     if e >= phi or gcd != 1:  # e must be coprime to phi
         raise ValueError("INVALID EXPONENT.")
