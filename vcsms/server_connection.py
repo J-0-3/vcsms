@@ -28,7 +28,7 @@ class ServerConnection:
         self.connected = False
         self._busy = False
 
-        
+
     def _handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
