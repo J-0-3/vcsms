@@ -55,12 +55,12 @@ def split_blocks(data: int) -> list:
     blocks = []
     if data == 0:
         return [0]
-    else:
-        block_count = math.ceil((get_msb(data)+1)/128)
-        for i in range(block_count):
-            blocks.append(data % 2**(128*(i+1)) >> 128*(i))
-        blocks.reverse()
-        return blocks
+
+    block_count = math.ceil((get_msb(data)+1)/128)
+    for i in range(block_count):
+        blocks.append(data % 2**(128*(i+1)) >> 128*(i))
+    blocks.reverse()
+    return blocks
 
 
 def split_bytes(n: int, byte_count: int = 4) -> list:
@@ -652,5 +652,4 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     plaintext = i_to_b(message)
     if plaintext[:3] == b'AES':
         return plaintext[3:] 
-    else:
-        raise DecryptionFailureException(key)
+    raise DecryptionFailureException(key)
