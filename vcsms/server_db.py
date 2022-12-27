@@ -10,6 +10,7 @@ class Server_DB:
     def setup_db(self):
         self.db.execute("create table if not exists connection_log (id text, time text)")
         self.db.execute("create table if not exists logged_in (id text unique, connected integer)")
+        self.db.execute("update logged_in set connected=0")
         self.db.commit()
 
     def user_known(self, id: str) -> bool:

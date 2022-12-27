@@ -7,8 +7,10 @@ from queue import Queue
 
 from .cryptographylib import dhke, sha256, aes256
 from .cryptographylib.utils import i_to_b
+from .cryptographylib.exceptions import DecryptionFailureException 
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
+from .exceptions.message_parser import MessageParseException
 from . import keys
 from . import signing
 from . import client_db
@@ -41,7 +43,7 @@ OUTGOING_MESSAGE_TYPES = {
 }
 
 class Client:
-    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str, logger: Logger):
+    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str, master_password: str, logger: Logger):
         self.ip = ip
         self.port = port
         self.fingerprint = fingerprint
@@ -53,6 +55,8 @@ class Client:
         self.messages = {}
         self.client_pubkeys = {}
         self.running = False
+        self.encryption_key = sha256.hash(master_password.encode('utf-8')) 
+        self.nickname_iv = 0
         self.message_queue = Queue()
         message_response_map = {
             "KeyFound": self.handler_key_found,
@@ -66,7 +70,7 @@ class Client:
         self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
         self.logger = logger
     
-    def receive(self) -> tuple[str, str]:
+    def receive(self) -> tuple[str, bytes]:
         return self.message_queue.get()
 
     def new_message(self) -> bool:
@@ -88,11 +92,19 @@ class Client:
         db.close()
         return contacts
 
+    def get_messages(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
+        db = self.db_connect()
+        messages = db.get_messages_by_nickname(nickname, count)
+        db.close()
+        return messages[::-1] # return in time order (oldest first)
+
     def send(self, recipient: str, message: bytes):
         db = self.db_connect()
         recipient_id = db.get_id(recipient)
         if recipient_id is None and re.fullmatch('^[a-fA-F0-9]{64}$', recipient):
             db.set_nickname(recipient, recipient)
+            recipient_id = recipient
+        db.insert_message(recipient_id, message, True)
         db.close()
         dh_priv = random.randrange(1, self.dhke_group[1])
         index = random.randrange(1, 2 ** 64)
@@ -104,13 +116,30 @@ class Client:
             "encryption_key": 0,
             "data": message
         }
-        recipient = recipient_id if recipient_id else recipient
-        message = self.message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
+        message = self.message_parser.construct_message(recipient_id, "NewMessage", index, dh_pub, dh_sig)
         self.server.send(message)
         
     def run(self):
-        os.makedirs(os.path.join(self.app_dir, "messages"), exist_ok=True)
         os.makedirs(os.path.join(self.app_dir, "keys"), exist_ok=True)
+        if os.path.exists(os.path.join(self.app_dir, "keytest")):
+            if not self.check_master_key():
+                raise Exception("Incorrect master key. Cannot run client program.")
+        else:
+            self.create_master_key_test()
+
+        if os.path.exists(os.path.join(self.app_dir, "nickname.iv")):
+            with open(os.path.join(self.app_dir, "nickname.iv"), 'r') as f:
+                ciphertext_iv, ciphertext = f.read().split(':')
+            ciphertext_iv = int(ciphertext_iv, 16)
+            ciphertext = bytes.fromhex(ciphertext)
+            self.nickname_iv = int(aes256.decrypt_cbc(ciphertext, self.encryption_key, ciphertext_iv), 16)
+        else:
+            self.nickname_iv = random.randrange(0, 2**128)
+            with open(os.path.join(self.app_dir, "nickname.iv"), 'w+') as f:
+                ciphertext_iv = random.randrange(0, 2**128)
+                ciphertext = aes256.encrypt_cbc(hex(self.nickname_iv)[2:].encode('utf-8'), self.encryption_key, ciphertext_iv)
+                f.write(f"{hex(ciphertext_iv)[2:]}:{ciphertext.hex()}")
+
         db = self.db_connect()
         db.setup()
         db.close()
@@ -133,6 +162,23 @@ class Client:
 
     def get_id(self) -> str:
         return keys.fingerprint(self.pub)
+
+    def create_master_key_test(self):
+        with open(os.path.join(self.app_dir, "keytest"), 'w+') as f:
+            data = random.randbytes(1024)
+            iv = random.randrange(0, 2**128)
+            encrypted_data = aes256.encrypt_cbc(data, self.encryption_key, iv)
+            f.write(f"{data.hex()}:{hex(iv)[2:]}:{encrypted_data.hex()}")
+
+    def check_master_key(self) -> bool:
+        with open(os.path.join(self.app_dir, "keytest"), 'r') as f:
+            plaintext, iv, ciphertext = f.read().split(':')
+        plaintext = bytes.fromhex(plaintext)
+        iv = int(iv, 16)
+        ciphertext = bytes.fromhex(ciphertext)
+        if ciphertext == aes256.encrypt_cbc(plaintext, self.encryption_key, iv):
+            return True
+        return False
 
     # methods for threads
     def incoming_thread(self):
@@ -165,12 +211,11 @@ class Client:
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index, sender_dh_pub, sender_dh_sig = values
 
-        db = self.db_connect()
         if message_index in self.messages:
-            db.close()
             self.logger.log(f"Message from {sender} requested use of already-in-use index {message_index}", 3) 
             return "IndexInUse", (message_index, )
 
+        db = self.db_connect()
         if not db.user_known(sender):
             db.close()
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
@@ -183,6 +228,7 @@ class Client:
             self.logger.log(f"Invalid Diffie Hellman signature from {sender}", 2)
             return "InvalidSignature", (message_index, )
 
+        db.close()
         dh_priv = random.randrange(1, self.dhke_group[1])
         dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, message_index)
         shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
@@ -207,7 +253,7 @@ class Client:
         signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
-            self.logger.log("Invalid Diffie Hellman signature from {sender}", 2)
+            self.logger.log("Invalid Diffie Hellman public key signature from {sender}", 2)
             return "InvalidSignature", (message_index, )
         db.close()
 
@@ -226,22 +272,22 @@ class Client:
             self.logger.log(f"Message data from {sender} for non-existent message {message_index}", 2)
             return "NoSuchIndex", (message_index, )
         encryption_key = self.messages[message_index]["encryption_key"]
-        plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
         try:
-            plaintext = plaintext.decode('utf-8')
-        except:
+            plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
+        except DecryptionFailureException:
             self.logger.log(f"Failed to decrypt message from {sender}", 1)
             return "DecryptionFailure", (message_index, ) 
         self.messages.pop(message_index)
         db = self.db_connect()
-        db.insert_message(sender, plaintext)
+        db.insert_message(sender, plaintext, False)
         nickname = db.get_nickname(sender)
-        db.close()
         if nickname is None:
+            db.set_nickname(sender, sender) 
             self.message_queue.put((sender, plaintext))
         else:
             self.message_queue.put((nickname, plaintext))
-            
+        db.close()        
+    
     def handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index = values[0]    
 
@@ -267,5 +313,5 @@ class Client:
             return "NewMessage", (message_index, dh_public, dh_signature)  
 
     def db_connect(self):
-        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "messages") + "/", os.path.join(self.app_dir, "keys") + "/")
+        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "keys") + "/", self.encryption_key, self.nickname_iv)
         return db

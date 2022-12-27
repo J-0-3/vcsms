@@ -1,3 +1,4 @@
+#!/bin/python
 from vcsms.client import Client
 from vcsms.logger import Logger
 import curses
@@ -13,7 +14,13 @@ class Application:
         self.bottom_bar = None
         self.left_panel = None
         self.main_panel = None
+        self.left_panel_bottom_bar = None
+        self.new_message = {}
         self.message_buffer = []
+        self.focused_user = ""
+        contacts = client.get_contacts()
+        if len(contacts) > 0:
+            self.focused_user = contacts[0] 
 
     def draw_top_bar(self):
         self.top_bar.clear()
@@ -27,19 +34,33 @@ class Application:
         self.bottom_bar.border()
         self.bottom_bar.refresh()
 
+    def draw_left_panel_bottom_bar(self, message: str = "h <- -> l"):
+        self.left_panel_bottom_bar.clear()
+        self.left_panel_bottom_bar.addstr(1, 1, message)
+        self.left_panel_bottom_bar.border()
+        self.left_panel_bottom_bar.refresh()
+
     def draw_left_panel(self):
         self.left_panel.clear()
         contacts = self.client.get_contacts()
+        self.left_panel.addstr(1, 1, "Contacts: ")
         for i in range(len(contacts)):
-            self.left_panel.addstr(i + 1, 1, contacts[i])
+            if contacts[i] == self.focused_user:
+                self.left_panel.addstr(i + 2, 1, f"[{contacts[i]}]")
+            else:
+                if contacts[i] in self.new_message and self.new_message[contacts[i]]:
+                    self.left_panel.addstr(i + 2, 1, f"*{contacts[i]}")
+                else:
+                    self.left_panel.addstr(i + 2, 1, contacts[i])
         self.left_panel.border()
-        self.left_panel.refresh(0, 0, 0, 0, curses.LINES, 25)
+        self.left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
 
     def draw_main_panel(self):
         self.main_panel.clear()
         num_to_display = curses.LINES - 8
-        for i in range(min(len(self.message_buffer), num_to_display)):
-            self.main_panel.addstr(i, 1, self.message_buffer[i]) 
+        messages = self.client.get_messages(self.focused_user, num_to_display)
+        for i,m in enumerate(messages):
+            self.main_panel.addstr(i, 1, f"{'TO' if m[1] else 'FROM'} {self.focused_user}: {m[0].decode('utf-8')}")
         self.main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS)
     
     def ask_input(self, label: str):
@@ -54,22 +75,24 @@ class Application:
         nickname = self.ask_input("Name").strip()
         id = self.ask_input("ID").strip() 
         self.client.add_contact(nickname, id)
+        if not self.focused_user:
+            self.focused_user = nickname
+            self.draw_main_panel()
         self.draw_bottom_bar()
         self.draw_left_panel()
 
     def send_message(self):
-        recipient = self.ask_input("To").strip()
         message = self.ask_input("Message").strip()
-        self.client.send(recipient, message.encode())
-        self.message_buffer.append(f"TO {recipient}: {message}")
+        self.client.send(self.focused_user, message.encode())
         self.draw_bottom_bar()
         self.draw_left_panel()
         self.draw_main_panel()
 
         
     def main(self, stdscr):
-        self.left_panel = curses.newpad(curses.LINES, 25)
+        self.left_panel = curses.newpad(curses.LINES - 3, 26)
         self.bottom_bar = curses.newwin(3, curses.COLS-26, curses.LINES-3, 26)
+        self.left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
         self.top_bar = curses.newwin(3, curses.COLS-26, 0, 26)
         self.main_panel = curses.newpad(curses.LINES-6, curses.COLS-26)
         self.stdscr = stdscr
@@ -78,11 +101,15 @@ class Application:
         self.draw_bottom_bar()
         self.draw_top_bar()
         self.draw_left_panel()
+        self.draw_left_panel_bottom_bar()
         self.draw_main_panel()
         while True:
             if self.client.new_message():
-                msg = self.client.receive()
-                self.message_buffer.append(f"FROM {msg[0]}: {msg[1]}")
+                sender, _ = self.client.receive()
+                if not self.focused_user:
+                    self.focused_user = sender
+                self.new_message[sender] = True
+                self.draw_left_panel()
                 self.draw_main_panel()
             try:
                 key = stdscr.getch()
@@ -96,17 +123,38 @@ class Application:
                 self.add_new_client()
             elif key == ord('n'):
                 self.send_message()
+            elif key == ord('l'):
+                contacts = self.client.get_contacts()
+                current_contact_index = contacts.index(self.focused_user)
+                next_index = (current_contact_index + 1) % len(contacts)
+                self.focused_user = contacts[next_index]
+                self.new_message[self.focused_user] = False
+                self.draw_left_panel()
+                self.draw_main_panel()
+            elif key == ord('h'):
+                contacts = self.client.get_contacts()
+                current_contact_index = contacts.index(self.focused_user)
+                prev_index = (current_contact_index - 1) % len(contacts)
+                self.focused_user = contacts[prev_index]
+                self.new_message[self.focused_user] = False
+                self.draw_left_panel()
+                self.draw_main_panel()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("ip", type=str, help="The ip address of the server to connect to")
     parser.add_argument("config", type=str, help="The server's .vcsms config file")
     parser.add_argument("-d", "--directory", type=str, default="vcsms", help="Where to store application-generated files")
+    parser.add_argument("-p", "--password", type=str, help="The application master password")
     args = parser.parse_args()
     with open(args.config, 'r') as conf:
         serverconf = json.loads(conf.read())
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
-    client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, logger)
+    if args.password:
+        client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
+    else:
+        client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, input("Enter master password: "), logger)
     client.run()
     application = Application(client)
     curses.wrapper(application.main)
