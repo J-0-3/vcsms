@@ -25,7 +25,7 @@ if __name__ == "__main__":
             config = json.loads(f.read())
     else:
         config = {
-            "ip": "0.0.0.0",
+            "ip": "127.0.0.1",
             "port": 6000
         }
 
