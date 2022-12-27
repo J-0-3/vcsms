@@ -4,6 +4,7 @@ import random
 from . import keys
 from .cryptographylib import aes256
 
+
 class Client_DB:
     def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
         self.db = sqlite3.connect(path)
