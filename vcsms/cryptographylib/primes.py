@@ -36,7 +36,7 @@ def miller_rabin_primality_test(n: int, r: int):
         for i in range(r):
             a = random.randrange(2, n - 1)
             b = pow(a, d, n)
-            if b == 1 or b == n - 1:   # +- 1 (mod n)
+            if b in {1, n - 1}:   # +- 1 (mod n)
                 continue
             for j in range(s):
                 check_next = False
