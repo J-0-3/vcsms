@@ -1,5 +1,6 @@
-from .cryptographylib import rsa, sha256, utils, dhke
+from .cryptographylib import rsa, sha256, dhke
 import time
+
 
 def sign(data: bytes, priv_key: tuple, ttl: int = 20) -> bytes:
     timestamp = time.time_ns().to_bytes(8, 'big')
@@ -8,6 +9,7 @@ def sign(data: bytes, priv_key: tuple, ttl: int = 20) -> bytes:
     sig_data = timestamp + time_to_live + hash
     signature = rsa.encrypt(sig_data, *priv_key)
     return signature.hex().encode('utf-8')
+
 
 def verify(data: bytes, signature: bytes, pub_key: tuple) -> bool:
         data_hash = sha256.hash(data)
@@ -19,6 +21,7 @@ def verify(data: bytes, signature: bytes, pub_key: tuple) -> bool:
             return True
         return False
 
+    
 def gen_signed_diffie_hellman(dh_private_key: int, rsa_private_key: tuple, dh_group: tuple, message_id: int = 0) -> tuple[int,bytes]:
     dh_public_key = dhke.generate_public_key(dh_private_key, dh_group)
     dh_public_key_hex = hex(dh_public_key)[2:].encode()
