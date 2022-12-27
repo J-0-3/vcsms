@@ -159,7 +159,7 @@ class Server:
         self.sockets.pop(id)
 
     @staticmethod
-    def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
+    def out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while sock.connected():
             if not outbox.empty():
                 message = outbox.get()
