@@ -1,7 +1,7 @@
 import re
 from .exceptions.message_parser import *
 class MessageParser:
-    def __init__(self, incoming_message_types: dict, outgoing_message_types: dict, response_map: dict = {}):
+    def __init__(self, incoming_message_types: dict, outgoing_message_types: dict, response_map: dict):
         self.incoming = incoming_message_types
         self.outgoing = outgoing_message_types    
         self.response_map = response_map
