@@ -311,8 +311,7 @@ class Client:
         dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, message_index)
         if message["encryption_key"]:
             return "MessageAccept", (message_index, dh_public, dh_signature)
-        else:
-            return "NewMessage", (message_index, dh_public, dh_signature)  
+        return "NewMessage", (message_index, dh_public, dh_signature)  
 
     def db_connect(self):
         db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "keys") + "/", self.encryption_key, self.nickname_iv)
