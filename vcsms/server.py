@@ -183,10 +183,10 @@ class Server:
             key = db.get_pubkey(target)
             db.close()
             return "KeyFound", (target, *key)
-        else:
-            self.logger.log(f"Key not found for user {target}", 3)
-            db.close()
-            return "KeyNotFound", (target, )
+
+        self.logger.log(f"Key not found for user {target}", 3)
+        db.close()
+        return "KeyNotFound", (target, )
 
 
     def _handler_quit(self, sender: str, _: list):
