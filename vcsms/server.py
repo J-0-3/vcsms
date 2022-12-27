@@ -7,7 +7,7 @@ import threading
 import argparse
 from queue import Queue
 
-from . import  keys
+from . import keys
 from . import signing
 from .server_db import Server_DB
 from .logger import Logger
