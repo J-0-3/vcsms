@@ -101,7 +101,7 @@ def combine_byte_array(byte_array: list) -> int:
     """
     word = 0
     for i in range(len(byte_array)):
-        word |= byte_array[i] << 8 * (len(byte_array)- 1 - i)
+        word |= byte_array[i] << 8 * (len(byte_array) - 1 - i)
     return word
 
 
