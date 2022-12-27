@@ -120,11 +120,8 @@ class Application:
                 self.new_message[sender] = True
                 self.draw_left_panel()
                 self.draw_main_panel()
-            try:
-                key = stdscr.getch()
-            except:
-                key = -1
 
+            key = stdscr.getch()
             if key == ord('q'):
                 self.client.quit()
                 break
