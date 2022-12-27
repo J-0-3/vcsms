@@ -1,4 +1,6 @@
 import time
+
+
 class Logger:
     def __init__(self, loglevel, logpath):
         self.level = loglevel
@@ -7,4 +9,3 @@ class Logger:
         if level <= self.level:
             with open(self.path, 'a+') as logfile:
                 logfile.write(f"{time.asctime()}|{level}|{message}\n")
-
