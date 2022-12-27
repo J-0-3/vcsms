@@ -81,7 +81,7 @@ class Server:
         try:
             c_id, c_exp, c_mod = identity_packet.split(b':')
             c_id = c_id.decode()
-        except (ValueError, UnicodeDecodeError):
+        except ValueError:
             self.logger.log("Connection failure. Malformed identity packet.", 1)
             client.send(b"MalformedIdentityPacket")
             client.close()
@@ -131,7 +131,7 @@ class Server:
                 raw = client.recv()
                 try:
                     iv, ciphertext = raw.decode().split(':', 1)
-                except (UnicodeDecodeError, ValueError):
+                except ValueError:
                     self.logger.log(f"Malformed message from {id}", 2)
                     return
                 try:
