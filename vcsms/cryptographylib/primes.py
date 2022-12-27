@@ -23,7 +23,7 @@ def sieve_of_eratosthenes(maximum: int) -> list:
     return [x + 2 for x in filter(lambda n: primes[n] == 0, range(len(primes)))]
 
 
-primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module import
+primes_up_to_1_million = sieve_of_eratosthenes(1000000)  # calculated on module import
 
 
 def miller_rabin_primality_test(n: int, r: int):
@@ -44,7 +44,7 @@ def miller_rabin_primality_test(n: int, r: int):
         for _ in range(s):
             check_next = False
             b = pow(b, 2, n)
-            if b == n - 1: # likely is prime (as this means it divides n)
+            if b == n - 1:  # likely is prime (as this means it divides n)
                 check_next = True
                 break
         if not check_next:
