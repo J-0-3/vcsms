@@ -49,9 +49,9 @@ class MessageParser:
                     elif type_info[i] == 16:
                         values_as_bytes.append(hex(values[i]).encode('utf-8')[2:])
                 elif types[i] is str:
-                        values_as_bytes.append(values[i].encode(type_info[i]))
+                    values_as_bytes.append(values[i].encode(type_info[i]))
                 elif types[i] is bytes:
-                        values_as_bytes.append(values[i].hex().encode('utf-8'))
+                    values_as_bytes.append(values[i].hex().encode('utf-8'))
         else:
             values_as_bytes = values
         message = b''
@@ -64,17 +64,17 @@ class MessageParser:
         return message
 
     def parse_message(self, data: bytes) -> tuple[str, str, list]:
-            if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
-                raise MalformedMessageException(data)
-            sender, message_type, payload = data.split(b':', 2)
-            sender = sender.decode('utf-8')
-            message_type = message_type.decode('utf-8')
+        if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
+            raise MalformedMessageException(data)
+        sender, message_type, payload = data.split(b':', 2)
+        sender = sender.decode('utf-8')
+        message_type = message_type.decode('utf-8')
 
-            if payload:
-                message_values = self.interpret_message_values(payload.split(b':'), message_type)
-            else:
-                message_values = []
-            return sender, message_type, message_values
+        if payload:
+            message_values = self.interpret_message_values(payload.split(b':'), message_type)
+        else:
+            message_values = []
+        return sender, message_type, message_values
 
     def handle(self, sender: str, message_type: str, values: list) -> bytes:
         """Handle the message using the handler function given in the response map and return the response.
@@ -88,7 +88,7 @@ class MessageParser:
             bytes: _description_
         """
         if message_type in self.response_map:                
-                response = self.response_map[message_type](sender, values)
-                if response:
-                    return self.construct_message(sender, response[0], *(response[1]))
+            response = self.response_map[message_type](sender, values)
+            if response:
+                return self.construct_message(sender, response[0], *(response[1]))
         return b''
