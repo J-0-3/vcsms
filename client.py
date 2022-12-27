@@ -24,13 +24,11 @@ class Application:
         if len(contacts) > 0:
             self.focused_user = contacts[0] 
 
-
     def draw_top_bar(self):
         self.top_bar.clear()
         self.top_bar.addstr(1, 1, f"Your ID: {self.client.get_id()}")
         self.top_bar.border()
         self.top_bar.refresh()
-
 
     def draw_bottom_bar(self, message: str = "(n)ew message, (a)dd contact, (q)uit"):
         self.bottom_bar.clear()
@@ -38,13 +36,11 @@ class Application:
         self.bottom_bar.border()
         self.bottom_bar.refresh()
 
-
     def draw_left_panel_bottom_bar(self, message: str = "h <- -> l"):
         self.left_panel_bottom_bar.clear()
         self.left_panel_bottom_bar.addstr(1, 1, message)
         self.left_panel_bottom_bar.border()
         self.left_panel_bottom_bar.refresh()
-
 
     def draw_left_panel(self):
         self.left_panel.clear()
@@ -61,7 +57,6 @@ class Application:
         self.left_panel.border()
         self.left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
 
-
     def draw_main_panel(self):
         self.main_panel.clear()
         num_to_display = curses.LINES - 8
@@ -70,7 +65,6 @@ class Application:
             self.main_panel.addstr(i, 1, f"{'TO' if m[1] else 'FROM'} {self.focused_user}: {m[0].decode('utf-8')}")
         self.main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS)
 
-
     def ask_input(self, label: str):
         self.draw_bottom_bar(f"{label}: ")
         textbox_container = curses.newwin(1, curses.COLS-(26 + len(label) + 3), curses.LINES-2, (26 + len(label) + 3))
@@ -78,7 +72,6 @@ class Application:
         self.stdscr.refresh()
         textbox.edit()
         return textbox.gather()
-
 
     def add_new_client(self):
         nickname = self.ask_input("Name").strip()
@@ -90,14 +83,12 @@ class Application:
         self.draw_bottom_bar()
         self.draw_left_panel()
 
-
     def send_message(self):
         message = self.ask_input("Message").strip()
         self.client.send(self.focused_user, message.encode())
         self.draw_bottom_bar()
         self.draw_left_panel()
         self.draw_main_panel()
-
 
     def main(self, stdscr):
         self.left_panel = curses.newpad(curses.LINES - 3, 26)
