@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 
+
 class Application:
     def __init__(self, client: Client):
         self.client = client
@@ -22,39 +23,44 @@ class Application:
         if len(contacts) > 0:
             self.focused_user = contacts[0] 
 
+            
     def draw_top_bar(self):
         self.top_bar.clear()
         self.top_bar.addstr(1, 1, f"Your ID: {self.client.get_id()}")
         self.top_bar.border()
         self.top_bar.refresh()
 
+        
     def draw_bottom_bar(self, message: str = "(n)ew message, (a)dd contact, (q)uit"):
         self.bottom_bar.clear()
         self.bottom_bar.addstr(1, 1, message) 
         self.bottom_bar.border()
         self.bottom_bar.refresh()
 
+        
     def draw_left_panel_bottom_bar(self, message: str = "h <- -> l"):
         self.left_panel_bottom_bar.clear()
         self.left_panel_bottom_bar.addstr(1, 1, message)
         self.left_panel_bottom_bar.border()
         self.left_panel_bottom_bar.refresh()
 
+        
     def draw_left_panel(self):
         self.left_panel.clear()
         contacts = self.client.get_contacts()
         self.left_panel.addstr(1, 1, "Contacts: ")
-        for i in range(len(contacts)):
-            if contacts[i] == self.focused_user:
-                self.left_panel.addstr(i + 2, 1, f"[{contacts[i]}]")
+        for i, contact in enumerate(contacts):
+            if contact == self.focused_user:
+                self.left_panel.addstr(i + 2, 1, f"[{contact}]")
             else:
-                if contacts[i] in self.new_message and self.new_message[contacts[i]]:
-                    self.left_panel.addstr(i + 2, 1, f"*{contacts[i]}")
+                if contact in self.new_message and self.new_message[contact]:
+                    self.left_panel.addstr(i + 2, 1, f"*{contact}")
                 else:
-                    self.left_panel.addstr(i + 2, 1, contacts[i])
+                    self.left_panel.addstr(i + 2, 1, contact)
         self.left_panel.border()
         self.left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
 
+        
     def draw_main_panel(self):
         self.main_panel.clear()
         num_to_display = curses.LINES - 8
@@ -62,6 +68,7 @@ class Application:
         for i,m in enumerate(messages):
             self.main_panel.addstr(i, 1, f"{'TO' if m[1] else 'FROM'} {self.focused_user}: {m[0].decode('utf-8')}")
         self.main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS)
+    
     
     def ask_input(self, label: str):
         self.draw_bottom_bar(f"{label}: ")
@@ -71,6 +78,7 @@ class Application:
         textbox.edit()
         return textbox.gather()
 
+    
     def add_new_client(self):
         nickname = self.ask_input("Name").strip()
         id = self.ask_input("ID").strip() 
@@ -81,6 +89,7 @@ class Application:
         self.draw_bottom_bar()
         self.draw_left_panel()
 
+        
     def send_message(self):
         message = self.ask_input("Message").strip()
         self.client.send(self.focused_user, message.encode())
