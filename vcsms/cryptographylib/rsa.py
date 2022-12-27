@@ -3,6 +3,7 @@ from typing import Union
 from . import primes
 from .utils import i_to_b
 
+
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b and also the values x and y such that ax + by = gcd (a,b).
 
@@ -22,8 +23,6 @@ def gcd_extended_euclid(a: int, b: int) -> tuple:
     y = stored_x
 
     return gcd, x, y
-
-
 
 
 def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
@@ -90,6 +89,7 @@ def decrypt(ciphertext: bytes, exponent: int, modulus: int) -> bytes:
     """
     
     return i_to_b(pow(int.from_bytes(ciphertext, 'big'), exponent, modulus))
+
 
 def gen_keypair(length: int = 2048):
     """Generate an RSA keypair with a given length modulus.
