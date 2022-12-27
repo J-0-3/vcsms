@@ -4,7 +4,7 @@ class ConnectionException(Exception):
 
 class MalformedPacketException(ConnectionException):
     def __init__(self):
-        super().__init__(f"Malformed packet")
+        super().__init__("Malformed packet")
 
 class PublicKeyIdMismatchException(ConnectionException):
     def __init__(self, public_key_fp, server_fp):
