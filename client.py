@@ -123,29 +123,30 @@ class Application:
                 self.draw_main_panel()
 
             key = stdscr.getch()
-            if key == ord('q'):
-                self.client.quit()
-                break
-            elif key == ord('a'):
-                self.add_new_client()
-            elif key == ord('n'):
-                self.send_message()
-            elif key == ord('l'):
-                contacts = self.client.get_contacts()
-                current_contact_index = contacts.index(self.focused_user)
-                next_index = (current_contact_index + 1) % len(contacts)
-                self.focused_user = contacts[next_index]
-                self.new_message[self.focused_user] = False
-                self.draw_left_panel()
-                self.draw_main_panel()
-            elif key == ord('h'):
-                contacts = self.client.get_contacts()
-                current_contact_index = contacts.index(self.focused_user)
-                prev_index = (current_contact_index - 1) % len(contacts)
-                self.focused_user = contacts[prev_index]
-                self.new_message[self.focused_user] = False
-                self.draw_left_panel()
-                self.draw_main_panel()
+            match key:
+                case ord('q'):
+                    self.client.quit()
+                    break
+                case ord('a'):
+                    self.add_new_client()
+                case ord('n'):
+                    self.send_message()
+                case ord('l'):
+                    contacts = self.client.get_contacts()
+                    current_contact_index = contacts.index(self.focused_user)
+                    next_index = (current_contact_index + 1) % len(contacts)
+                    self.focused_user = contacts[next_index]
+                    self.new_message[self.focused_user] = False
+                    self.draw_left_panel()
+                    self.draw_main_panel()
+                case ord('h'):
+                    contacts = self.client.get_contacts()
+                    current_contact_index = contacts.index(self.focused_user)
+                    prev_index = (current_contact_index - 1) % len(contacts)
+                    self.focused_user = contacts[prev_index]
+                    self.new_message[self.focused_user] = False
+                    self.draw_left_panel()
+                    self.draw_main_panel()
 
 
 if __name__ == "__main__":
