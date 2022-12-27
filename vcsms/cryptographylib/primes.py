@@ -33,12 +33,12 @@ def miller_rabin_primality_test(n: int, r: int):
             d //= 2
             s += 1
 
-        for i in range(r):
+        for _ in range(r):
             a = random.randrange(2, n - 1)
             b = pow(a, d, n)
             if b in {1, n - 1}:   # +- 1 (mod n)
                 continue
-            for j in range(s):
+            for _ in range(s):
                 check_next = False
                 b = pow(b, 2, n)
                 if b == n - 1: # likely is prime (as this means it divides n)
