@@ -22,6 +22,7 @@ def sieve_of_eratosthenes(maximum: int) -> list:
 
     return [x + 2 for x in filter(lambda n: primes[n] == 0, range(len(primes)))]
 
+
 primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module import
 
 
