@@ -8,7 +8,6 @@ class MessageParser:
         self.outgoing = outgoing_message_types    
         self.response_map = response_map
 
-
     def interpret_message_values(self, values: list, message_type: str) -> list:
         #  cast an array of byte strings to the values specified in the message schema
         if message_type in self.incoming:
@@ -31,7 +30,6 @@ class MessageParser:
             except TypeError:
                 raise ParameterImpossibleTypeCastException(v, types[i], message_type)
         return casted
-
 
     def construct_message(self,recipient: str, message_type: str, *values) -> bytes:
         if message_type in self.outgoing:
@@ -65,7 +63,6 @@ class MessageParser:
             message += values_as_bytes[-1]
         return message
 
-
     def parse_message(self, data: bytes) -> tuple[str, str, list]:
             if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
                 raise MalformedMessageException(data)
@@ -78,7 +75,6 @@ class MessageParser:
             else:
                 message_values = []
             return sender, message_type, message_values
-
 
     def handle(self, sender: str, message_type: str, values: list) -> bytes:
         """Handle the message using the handler function given in the response map and return the response.
