@@ -45,7 +45,6 @@ class Server:
         }
         self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, response_map)
 
-
     def run(self):
         self.sock.bind((self.addr, self.port))
         self.sock.listen(30)
@@ -61,17 +60,14 @@ class Server:
             t_connect = threading.Thread(target=self._connect, args=(ns_sock,))
             t_connect.start()
 
-
     def _connect(self, client: NonStreamSocket):
         self._handshake(client)
-
 
     def send(self, client: str, message: bytes):
         if client not in self.client_outboxes:
             self.logger.log("Message to offline/unknown user {client}", 3)
             self.client_outboxes[client] = Queue()
         self.client_outboxes[client].put(message)
-
 
     def _handshake(self, client: NonStreamSocket):
         pub_exp = hex(self.pub[0])[2:].encode()
@@ -123,7 +119,6 @@ class Server:
         t_in.start()
         t_out.start()
 
-
     # thread methods
     def _in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
         while client.connected():
@@ -161,7 +156,6 @@ class Server:
         self.logger.log(f"User {id} closed the connection", 1)
         self.sockets.pop(id)
 
-
     @staticmethod
     def _out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while sock.connected():
@@ -170,7 +164,6 @@ class Server:
                 aes_iv = random.randrange(1, 2 ** 128)
                 encrypted_message = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex().encode('utf-8')
                 sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
-
 
     # message type handler methods
     def _handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -188,11 +181,9 @@ class Server:
         db.close()
         return "KeyNotFound", (target, )
 
-
     def _handler_quit(self, sender: str, _: list):
         self.logger.log(f"User {sender} requested a logout", 1)
         self.sockets[sender].close()
-
 
     def _db_connect(self) -> Server_DB:
         db = Server_DB(self.db_path, self.pubkey_path)
