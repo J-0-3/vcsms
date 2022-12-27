@@ -40,8 +40,8 @@ class Server:
         self.pubkey_path = pubkey_directory
         self.logger = logger
         response_map = {
-            "GetKey": self.handler_get_key,
-            "Quit": self.handler_quit
+            "GetKey": self._handler_get_key,
+            "Quit": self._handler_quit
         }
         self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, response_map)
 
@@ -49,7 +49,7 @@ class Server:
     def run(self):
         self.sock.bind((self.addr, self.port))
         self.sock.listen(30)
-        db = self.db_connect()
+        db = self._db_connect()
         db.setup_db()
         db.close()
         self.logger.log(f"Running on {self.addr}:{self.port}", 0)
@@ -58,12 +58,12 @@ class Server:
             self.logger.log(f"New connection from: {addr}", 2)
             ns_sock = NonStreamSocket(conn)
             ns_sock.listen()
-            t_connect = threading.Thread(target=self.connect, args=(ns_sock,))
+            t_connect = threading.Thread(target=self._connect, args=(ns_sock,))
             t_connect.start()
 
 
-    def connect(self, client: NonStreamSocket):
-        self.handshake(client)
+    def _connect(self, client: NonStreamSocket):
+        self._handshake(client)
 
 
     def send(self, client: str, message: bytes):
@@ -73,7 +73,7 @@ class Server:
         self.client_outboxes[client].put(message)
 
 
-    def handshake(self, client: NonStreamSocket):
+    def _handshake(self, client: NonStreamSocket):
         pub_exp = hex(self.pub[0])[2:].encode()
         pub_mod = hex(self.pub[1])[2:].encode()
         client.send(pub_exp + b':' + pub_mod)
@@ -114,24 +114,24 @@ class Server:
             self.client_outboxes[c_id] = outbox
 
         self.sockets[c_id] = client
-        db = self.db_connect()
+        db = self._db_connect()
         db.user_login(c_id, client_pubkey)
         db.close()
         self.logger.log(f"User {c_id} successfully authenticated", 1)
-        t_in = threading.Thread(target=self.in_thread, args=(client, encryption_key, c_id))
-        t_out = threading.Thread(target=self.out_thread, args=(client, outbox, encryption_key))
+        t_in = threading.Thread(target=self._in_thread, args=(client, encryption_key, c_id))
+        t_out = threading.Thread(target=self._out_thread, args=(client, outbox, encryption_key))
         t_in.start()
         t_out.start()
 
 
     # thread methods
-    def in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
+    def _in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
         while client.connected():
             if client.new():
                 raw = client.recv()
                 try:
                     iv, ciphertext = raw.decode().split(':', 1)
-                except UnicodeDecodeError, ValueError:
+                except (UnicodeDecodeError, ValueError):
                     self.logger.log(f"Malformed message from {id}", 2)
                     return
                 try:
@@ -155,7 +155,7 @@ class Server:
                     to_send = self.message_parser.construct_message(id, message_type, *message_values)
                     self.send(recipient, to_send)
 
-        db = self.db_connect()
+        db = self._db_connect()
         db.user_logout(id)
         db.close()
         self.logger.log(f"User {id} closed the connection", 1)
@@ -163,7 +163,7 @@ class Server:
 
 
     @staticmethod
-    def out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
+    def _out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while sock.connected():
             if not outbox.empty():
                 message = outbox.get()
@@ -173,11 +173,11 @@ class Server:
 
 
     # message type handler methods
-    def handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
+    def _handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
         target = values[0]
 
         self.logger.log(f"User {sender} requested key for user {target}", 3) 
-        db = self.db_connect()
+        db = self._db_connect()
         if db.user_known(target):
             self.logger.log(f"Key found for user {target}", 3)
             key = db.get_pubkey(target)
@@ -189,11 +189,11 @@ class Server:
             return "KeyNotFound", (target, )
 
 
-    def handler_quit(self, sender: str, _: list):
+    def _handler_quit(self, sender: str, _: list):
         self.logger.log(f"User {sender} requested a logout", 1)
         self.sockets[sender].close()
 
 
-    def db_connect(self) -> Server_DB:
+    def _db_connect(self) -> Server_DB:
         db = Server_DB(self.db_path, self.pubkey_path)
         return db
