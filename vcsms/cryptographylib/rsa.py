@@ -56,8 +56,7 @@ def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
     gcd, d, null = gcd_extended_euclid(e, phi)
     d %= phi  # this is to eliminate the possibility of negative values for d
     if e >= phi or gcd != 1:  # e must be coprime to phi
-        print("INVALID EXPONENT.")
-        return
+        raise ValueError("INVALID EXPONENT.")
     private_key = (d, n)
     return public_key, private_key
 
