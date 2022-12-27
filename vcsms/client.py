@@ -266,7 +266,7 @@ class Client:
         self.messages.pop(message_index)
         return "MessageData", (message_index, aes_iv, ciphertext)
     
-    def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple]|None:
+    def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
         message_index, aes_iv, ciphertext = values
         if message_index not in self.messages:
             self.logger.log(f"Message data from {sender} for non-existent message {message_index}", 2)
