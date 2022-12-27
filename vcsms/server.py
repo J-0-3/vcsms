@@ -81,7 +81,7 @@ class Server:
         try:
             c_id, c_exp, c_mod = identity_packet.split(b':')
             c_id = c_id.decode()
-        except ValueError, UnicodeDecodeError:
+        except (ValueError, UnicodeDecodeError):
             self.logger.log("Connection failure. Malformed identity packet.", 1)
             client.send(b"MalformedIdentityPacket")
             client.close()
