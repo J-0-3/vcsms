@@ -10,7 +10,7 @@ from .logger import Logger
 from .cryptographylib import dhke, sha256, aes256, utils
 from .non_stream_socket import NonStreamSocket
 from .message_parser import MessageParser
-from .exceptions.message_parser import *
+from .exceptions.message_parser import MessageParseException
 
 INCOMING_MESSAGE_TYPES = {
     "GetKey": (1,[str],['utf-8']),
