@@ -23,6 +23,8 @@ def sieve_of_eratosthenes(maximum: int) -> list:
     return [x + 2 for x in filter(lambda n: primes[n] == 0, range(len(primes)))]
 
 primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module import
+
+
 def miller_rabin_primality_test(n: int, r: int):
         if n % 2 == 0 or n == 1:
             return False
@@ -56,7 +58,6 @@ def is_prime(x: int):
     if miller_rabin_primality_test(x, 100):
         return True
     return False
-
 
 
 if __name__ == "__main__":
