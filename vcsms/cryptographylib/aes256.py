@@ -173,6 +173,7 @@ def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
         z ^= x * (2 ** i) * y_coefficients[7 - i]
     return gf_mod_bytes(z, modulus)
 
+
 multiply_lookup = []
 for i in range(256):
     row = []
