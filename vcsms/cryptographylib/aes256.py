@@ -128,6 +128,7 @@ def byte_to_bits(x: int) -> list:
             cur -= 2 ** i
     return bits
 
+
 # Galois field arithmetic operations
 def gf_mod_bytes(b: int, mod: int) -> int:
     """Calculate the modulus of a division of two bytes representing polynomials
