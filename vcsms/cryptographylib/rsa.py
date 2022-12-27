@@ -71,7 +71,7 @@ def encrypt(plaintext: bytes, exponent: int, modulus: int) -> bytes:
     Returns:
         int: The encrypted ciphertext
     """
-    
+
     plaintext = int.from_bytes(plaintext, 'big')
     return i_to_b(pow(plaintext, exponent, modulus))
 
@@ -87,7 +87,7 @@ def decrypt(ciphertext: bytes, exponent: int, modulus: int) -> bytes:
     Returns:
         bytes: The decrypted plaintext
     """
-    
+
     return i_to_b(pow(int.from_bytes(ciphertext, 'big'), exponent, modulus))
 
 
@@ -103,14 +103,14 @@ def gen_keypair(length: int = 2048):
     while True:
         if length % 2 != 0:
             raise ValueError("INVALID KEYLENGTH. MUST BE EVEN.")
-        
+
         p = random.randrange(1, 2**(length//2))
         while not primes.is_prime(p):
             p = random.randrange(1, 2**(length//2))
         q = random.randrange(1, 2**(length//2))
         while not primes.is_prime(q):
             q = random.randrange(1, 2**(length//2))
-    
+
         pub, priv = calculate_keys(p, q)
         ciphertext = encrypt(b'\xb0\x0b\x1e\x50', *pub)
         if decrypt(ciphertext, *priv) == b'\xb0\x0b\x1e\x50':

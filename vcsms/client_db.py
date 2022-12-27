@@ -60,13 +60,13 @@ class Client_DB:
 
     def save_key(self, id: str, key: tuple[int, int]):
         keys.write_key(key, self.key_file_prefix + id)
-    
+
     def user_known(self, id: str) -> bool:
         return os.path.exists(self.key_file_prefix + id)
 
     def get_key(self, id: str) -> tuple[int, int]:
         return keys.load_key(self.key_file_prefix + id)
-   
+
     def get_users(self) -> list[str]:
         cursor = self.db.cursor()
         cursor.execute("SELECT nickname FROM nicknames")

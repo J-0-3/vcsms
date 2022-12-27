@@ -29,7 +29,7 @@ class ServerConnection:
         self.busy = False
 
     def handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
-        
+
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
         try:
@@ -49,7 +49,7 @@ class ServerConnection:
 
         dhke_priv = random.randrange(1, dhke_group[1])
         dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, priv_key, dhke_group)
-        
+
         try:
             s_dhke_pub, s_dhke_pub_sig = self.socket.recv().split(b':')
         except:
@@ -66,7 +66,7 @@ class ServerConnection:
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self.encryption_key = sha256.hash(utils.i_to_b(shared_key))
-        
+
     def connect(self, pub_key: tuple[int, int], priv_key: tuple[int, int], skip_fp_verify: bool = False):
         self.connected = True
         self.socket.connect(self.ip, self.port)
@@ -97,7 +97,7 @@ class ServerConnection:
                     self.logger.log("Failed to decrypt message from server", 2)
                     continue
                 self.in_queue.put(message)
-    
+
     def __out_thread(self):
         while self.connected:
             if not self.out_queue.empty():
@@ -120,9 +120,9 @@ class ServerConnection:
 
     def send(self, data: bytes):
         self.out_queue.put(data)
-        
+
     def read(self) -> bytes:
         return self.in_queue.get()
-    
+
     def new_msg(self) -> bool:
         return not self.in_queue.empty()
