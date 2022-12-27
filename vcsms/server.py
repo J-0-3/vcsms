@@ -21,6 +21,8 @@ OUTGOING_MESSAGE_TYPES = {
     "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
     "KeyNotFound": (1, [str], ['utf-8']) 
 }
+
+
 class Server:
     def __init__(self, addr: str, port: int, keypair: tuple, db_path: str, pubkey_directory: str, logger: Logger):
         self.addr = addr
@@ -50,9 +52,7 @@ class Server:
         db = self.db_connect()
         db.setup_db()
         db.close()
-
         self.logger.log(f"Running on {self.addr}:{self.port}", 0)
-
         while True:
             conn, addr = self.sock.accept()
             self.logger.log(f"New connection from: {addr}", 2)
@@ -65,11 +65,13 @@ class Server:
     def connect(self, client: NonStreamSocket):
         self.handshake(client)
 
+
     def send(self, client: str, message: bytes):
         if client not in self.client_outboxes:
             self.logger.log("Message to offline/unknown user {client}", 3)
             self.client_outboxes[client] = Queue()
         self.client_outboxes[client].put(message)
+
 
     def handshake(self, client: NonStreamSocket):
         pub_exp = hex(self.pub[0])[2:].encode()
@@ -79,7 +81,7 @@ class Server:
         try:
             c_id, c_exp, c_mod = identity_packet.split(b':')
             c_id = c_id.decode()
-        except:
+        except ValueError, UnicodeDecodeError:
             self.logger.log("Connection failure. Malformed identity packet.", 1)
             client.send(b"MalformedIdentityPacket")
             client.close()
@@ -121,6 +123,7 @@ class Server:
         t_in.start()
         t_out.start()
 
+
     # thread methods
     def in_thread(self, client: NonStreamSocket, encryption_key: int, id: str):
         while client.connected():
@@ -128,12 +131,12 @@ class Server:
                 raw = client.recv()
                 try:
                     iv, ciphertext = raw.decode().split(':', 1)
-                except:
+                except UnicodeDecodeError, ValueError:
                     self.logger.log(f"Malformed message from {id}", 2)
                     return
                 try:
                     iv = int(iv, 16)
-                except:
+                except ValueError:
                     self.logger.log(f"Invalid initialization vector {iv}", 2)
                     return
                 data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, iv)
@@ -157,6 +160,7 @@ class Server:
         db.close()
         self.logger.log(f"User {id} closed the connection", 1)
         self.sockets.pop(id)
+
 
     @staticmethod
     def out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
@@ -184,9 +188,11 @@ class Server:
             db.close()
             return "KeyNotFound", (target, )
 
+
     def handler_quit(self, sender: str, _: list):
         self.logger.log(f"User {sender} requested a logout", 1)
         self.sockets[sender].close()
+
 
     def db_connect(self) -> Server_DB:
         db = Server_DB(self.db_path, self.pubkey_path)
