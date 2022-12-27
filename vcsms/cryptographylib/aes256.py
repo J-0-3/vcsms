@@ -33,7 +33,7 @@ def invert_sbox(s_box: list) -> list:
 
     inverted_s_box = [[0 for column in s_box] for row in s_box]
     for row_index, row in enumerate(s_box):
-        for col_index, col in enumerate(row):
+        for col_index, _ in enumerate(row):
             inverted_s_box[s_box[row_index][col_index] >> 4][s_box[row_index][col_index] % 2**4] = (row_index << 4) | col_index
     return inverted_s_box
 
