@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     if os.path.exists(os.path.join(server_directory, "server.conf")):
         with open(os.path.join(server_directory, "server.conf")) as f:
-            config = json.loads(f.read())
+            config = json.load(f)
     else:
         config = {
             "ip": "127.0.0.1",
@@ -31,10 +31,10 @@ if __name__ == "__main__":
 
     if args.config_out:
         with open(args.config_out, 'w') as f:
-            f.write(json.dumps({
+            json.dump({
                 "port": config["port"],
                 "fingerprint": keys.fingerprint(pub)
-            }))
+            }, f)
 
     logger = Logger(5, os.path.join(server_directory, "log.txt"))
     server = Server(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"), logger)
