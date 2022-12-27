@@ -601,7 +601,7 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
         bytes: The encrypted ciphertext bytestring
     """
     data_as_int = int.from_bytes(b'AES' + data, 'big')
-    message_blocks = split_blocks(data_as_int) # split message into blocks
+    message_blocks = split_blocks(data_as_int)  # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
     prev_output = initialisation_vector
@@ -612,7 +612,7 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
         ciphertext_blocks.append(ciphertext_block)
 
     # combine blocks by repeated left shift and OR 
-    shift = len(ciphertext_blocks) * 128 - 128 # first block is most significant (big endian)  
+    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant (big endian)  
     ciphertext = 0
     for block in ciphertext_blocks:
         ciphertext |= (block << shift)
