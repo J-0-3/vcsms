@@ -287,6 +287,7 @@ class Client:
         else:
             self.message_queue.put((nickname, plaintext))
         db.close()        
+        return None
     
     def handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index = values[0]    
