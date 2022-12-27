@@ -37,8 +37,8 @@ def calculate_shared_key(private_key: int, peer_public_key: int, group: tuple) -
     """
     return pow(peer_public_key, private_key, group[1])
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     import random
     a_priv = random.randrange(1, group18_8192[1])
     b_priv = random.randrange(1, group18_8192[1])
