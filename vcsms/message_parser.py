@@ -1,5 +1,5 @@
 import re
-from .exceptions.message_parser import *
+from .exceptions.message_parser import ParameterCountException, ParameterImpossibleTypeCastException, ParameterWrongTypeException, MalformedMessageException
 
 
 class MessageParser:
