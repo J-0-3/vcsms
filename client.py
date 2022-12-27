@@ -11,6 +11,7 @@ import os
 class Application:
     def __init__(self, client: Client):
         self.client = client
+        self.stdscr = None
         self.top_bar = None
         self.bottom_bar = None
         self.left_panel = None
@@ -164,5 +165,3 @@ if __name__ == "__main__":
     client.run()
     application = Application(client)
     curses.wrapper(application.main)
-
-
