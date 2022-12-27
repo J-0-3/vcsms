@@ -95,7 +95,4 @@ class MessageParser:
                 response = self.response_map[message_type](sender, values)
                 if response:
                     return self.construct_message(sender, response[0], *(response[1]))
-                else:
-                    return b''
-        else:
-            return b''
+        return b''
