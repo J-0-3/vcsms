@@ -14,7 +14,6 @@ class MessageParser:
         if message_type in self.incoming:
             message_schema = self.incoming[message_type]
         else:
-            # print(f"WARNING: Unknown message type {message_type}")
             return values
 
         length, types, type_info = message_schema
@@ -56,7 +55,6 @@ class MessageParser:
                 elif types[i] is bytes:
                         values_as_bytes.append(values[i].hex().encode('utf-8'))
         else:
-            # print(f"WARNING: unknown outgoing message type: {message_type}")
             values_as_bytes = values
         message = b''
         message += recipient.encode() + b':'
