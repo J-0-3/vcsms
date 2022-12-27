@@ -12,7 +12,7 @@ class NonStreamSocket:
         self.incoming_in_progress = b''
         self.outgoing_in_progress = b''
         self.open = False
-    
+
     def __checklife_thread(self):
         while self.open:
             time.sleep(1)

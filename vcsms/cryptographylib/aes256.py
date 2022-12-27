@@ -30,7 +30,7 @@ def invert_sbox(s_box: list) -> list:
     Returns:
         list: 2D list containing the inverted substitution box
     """
-    
+
     inverted_s_box = [[0 for column in s_box] for row in s_box]
     for row_index, row in enumerate(s_box):
         for col_index, col in enumerate(row):
@@ -81,7 +81,7 @@ def split_bytes(n: int, byte_count: int = 4) -> list:
         bit_length = 0
     else:
         bit_length = get_msb(n) + 1
-        
+
     byte_length = math.ceil(bit_length / 8)
     if byte_length > byte_count:
         raise Exception(f"Need at least {byte_length} bytes to hold {n}.")
@@ -131,8 +131,8 @@ def byte_to_bits(x: int) -> list:
 # Galois field arithmetic operations
 def gf_mod_bytes(b: int, mod: int) -> int:
     """Calculate the modulus of a division of two bytes representing polynomials
-    in an order 2^8 galois field (eg 138 = 10001010 = x^7 + x^3 + x^1).  
-    
+    in an order 2^8 galois field (eg 138 = 10001010 = x^7 + x^3 + x^1).
+
 
     Args:
         b (int): The dividend
@@ -189,7 +189,7 @@ def transpose_matrix(m: list) -> list:
     Returns:
         list: 2D list containing the transposed matrix
     """
-    
+
     return [[m[0][0], m[1][0], m[2][0], m[3][0]], 
             [m[0][1], m[1][1], m[2][1], m[3][1]],
             [m[0][2], m[1][2], m[2][2], m[3][2]],
@@ -227,7 +227,7 @@ def sub_bytes(state: list, inverse: bool = False) -> list:
     Returns:
         list: _description_
     """
-    
+
     subbed_state = []
     for row in state:
         subbed = []
@@ -327,7 +327,7 @@ def int_to_word_array(x: int, words: int = 4) -> list:
         bit_length = 0
     else:
         bit_length = get_msb(x) + 1
-    
+
     bit_length_as_multiple_of_32 = 32 * math.ceil(bit_length / 32)
     word_array = []
     if bit_length_as_multiple_of_32 / 32 > words:
@@ -396,7 +396,7 @@ def round_constant(n: int):
 
     Args:
         n (int): The round constant to generate, should be the key schedule row divided by 8 (only for exact multiples)
-    
+
     Returns:
         int: The calculated 32 bit round constant
     """
@@ -408,7 +408,7 @@ def sub_word(word: int):
 
     Args:
         word (int): The word to subsitute bytes for
-    
+
     Returns:
         int: The resultant word
     """
@@ -578,7 +578,7 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
     for block in message_blocks:
         message |= (block << shift)
         shift -= 128
-    
+
     return i_to_b(message)
 
 
@@ -608,14 +608,14 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
         ciphertext_block = encrypt_block(key_schedule, xored_block) 
         prev_output = ciphertext_block
         ciphertext_blocks.append(ciphertext_block)
-    
+
     # combine blocks by repeated left shift and OR 
     shift = len(ciphertext_blocks) * 128 - 128 # first block is most significant (big endian)  
     ciphertext = 0
     for block in ciphertext_blocks:
         ciphertext |= (block << shift)
         shift -= 128                           # 128 bit long blocks
-    
+
     return i_to_b(ciphertext)
 
 
@@ -639,7 +639,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
             prev_output = initialisation_vector
         else:
             prev_output = ciphertext_blocks[i-1]
-        
+
         xored_block = decrypt_block(key_schedule, block)
         message_blocks.append(xored_block ^ prev_output)
 
@@ -648,7 +648,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     for block in message_blocks:
         message |= (block << shift)
         shift -= 128
-    
+
     plaintext = i_to_b(message)
     if plaintext[:3] == b'AES':
         return plaintext[3:] 

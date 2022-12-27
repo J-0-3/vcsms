@@ -70,13 +70,13 @@ class Client:
         }
         self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
         self.logger = logger
-    
+
     def receive(self) -> tuple[str, bytes]:
         return self.message_queue.get()
 
     def new_message(self) -> bool:
         return not self.message_queue.empty()
-    
+
     def add_contact(self, nickname: str, id: str):
         db = self.db_connect()
         id = id.strip().lower()
@@ -86,7 +86,7 @@ class Client:
         else:
             self.logger.log("Invalid ID Format", 1)
             db.close()
-    
+
     def get_contacts(self) -> list:
         db = self.db_connect()
         contacts = db.get_users()
@@ -119,7 +119,7 @@ class Client:
         }
         message = self.message_parser.construct_message(recipient_id, "NewMessage", index, dh_pub, dh_sig)
         self.server.send(message)
-        
+
     def run(self):
         os.makedirs(os.path.join(self.app_dir, "keys"), exist_ok=True)
         if os.path.exists(os.path.join(self.app_dir, "keytest")):
@@ -155,7 +155,7 @@ class Client:
         self.running = True
         t_incoming = threading.Thread(target=self.incoming_thread, args=())
         t_incoming.start()
-    
+
     def quit(self):
         self.server.send(self.message_parser.construct_message("0", "Quit"))
         self.running = False
@@ -188,7 +188,7 @@ class Client:
                 msg = self.server.read()
                 t_process = threading.Thread(target=self.msg_process_thread, args=(msg,))
                 t_process.start()    
-   
+
     def msg_process_thread(self, data: bytes):
         try:
             sender, message_type, message_values = self.message_parser.parse_message(data)
@@ -198,17 +198,17 @@ class Client:
         response = self.message_parser.handle(sender, message_type, message_values)
         if response:
             self.server.send(response)
-    
+
     # message type handlers
 
     def handler_key_found(self, _, values: list) -> None:
         db = self.db_connect()
         db.save_key(values[0], (values[1], values[2]))
         db.close()
-    
+
     def handler_key_not_found(self, _, values: list) -> None:
         self.logger.log(f"Server could not locate public key for {values[0]}", 2)
-    
+
     def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index, sender_dh_pub, sender_dh_sig = values
 
@@ -222,7 +222,7 @@ class Client:
             self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
             self.logger.log(f"Message from unknown user {sender}", 3)
             return "ResendAuthPacket", (message_index, )
-        
+
         signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
@@ -234,7 +234,7 @@ class Client:
         dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, message_index)
         shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
-        
+
         self.messages[message_index] = {"dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
@@ -250,7 +250,7 @@ class Client:
             db.close()
             self.logger.log(f"Message to unknown user {sender}", 2)
             return "ResendAuthPacket", (message_index, )
-        
+
         signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
@@ -266,7 +266,7 @@ class Client:
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
         self.messages.pop(message_index)
         return "MessageData", (message_index, aes_iv, ciphertext)
-    
+
     def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
         message_index, aes_iv, ciphertext = values
         if message_index not in self.messages:
@@ -289,7 +289,7 @@ class Client:
             self.message_queue.put((nickname, plaintext))
         db.close()        
         return None
-    
+
     def handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index = values[0]    
 
@@ -301,7 +301,7 @@ class Client:
         dh_private = message["dh_private"]
         dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, new_id)
         return "NewMessage", (new_id, dh_public, dh_signature)
-        
+
     def handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
         message_index = values[0]
 

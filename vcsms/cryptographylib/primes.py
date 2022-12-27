@@ -32,7 +32,7 @@ def miller_rabin_primality_test(n: int, r: int):
         while d % 2 == 0:
             d //= 2
             s += 1
-        
+
         for i in range(r):
             a = random.randrange(2, n - 1)
             b = pow(a, d, n)
@@ -56,7 +56,7 @@ def is_prime(x: int):
     if miller_rabin_primality_test(x, 100):
         return True
     return False
-   
+
 
 
 if __name__ == "__main__":

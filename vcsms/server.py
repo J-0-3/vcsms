@@ -43,7 +43,7 @@ class Server:
         }
         self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, response_map)
 
-    
+
     def run(self):
         self.sock.bind((self.addr, self.port))
         self.sock.listen(30)
@@ -70,7 +70,7 @@ class Server:
             self.logger.log("Message to offline/unknown user {client}", 3)
             self.client_outboxes[client] = Queue()
         self.client_outboxes[client].put(message)
-    
+
     def handshake(self, client: NonStreamSocket):
         pub_exp = hex(self.pub[0])[2:].encode()
         pub_mod = hex(self.pub[1])[2:].encode()
@@ -110,7 +110,7 @@ class Server:
         else:
             outbox = Queue()
             self.client_outboxes[c_id] = outbox
-        
+
         self.sockets[c_id] = client
         db = self.db_connect()
         db.user_login(c_id, client_pubkey)
@@ -166,7 +166,7 @@ class Server:
                 aes_iv = random.randrange(1, 2 ** 128)
                 encrypted_message = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex().encode('utf-8')
                 sock.send(hex(aes_iv).encode() + b':' + encrypted_message)
-        
+
 
     # message type handler methods
     def handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -183,11 +183,11 @@ class Server:
             self.logger.log(f"Key not found for user {target}", 3)
             db.close()
             return "KeyNotFound", (target, )
-    
+
     def handler_quit(self, sender: str, _: list):
         self.logger.log(f"User {sender} requested a logout", 1)
         self.sockets[sender].close()
-    
+
     def db_connect(self) -> Server_DB:
         db = Server_DB(self.db_path, self.pubkey_path)
         return db
