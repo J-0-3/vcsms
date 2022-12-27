@@ -114,4 +114,4 @@ def gen_keypair(length: int = 2048):
         pub, priv = calculate_keys(p, q)
         ciphertext = encrypt(b'\xb0\x0b\x1e\x50', *pub)
         if decrypt(ciphertext, *priv) == b'\xb0\x0b\x1e\x50':
-            return pub,priv
+            return pub, priv
