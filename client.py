@@ -155,7 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--password", type=str, help="The application master password")
     args = parser.parse_args()
     with open(args.config, 'r') as conf:
-        serverconf = json.loads(conf.read())
+        serverconf = json.load(conf)
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
     if args.password:
         client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
