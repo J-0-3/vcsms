@@ -12,14 +12,14 @@ def sign(data: bytes, priv_key: tuple, ttl: int = 20) -> bytes:
 
 
 def verify(data: bytes, signature: bytes, pub_key: tuple) -> bool:
-        data_hash = sha256.hash(data)
-        signature_data = rsa.decrypt(bytes.fromhex(signature.decode('utf-8')), *pub_key)
-        timestamp = int.from_bytes(signature_data[0:8], 'big')
-        ttl = int.from_bytes(signature_data[8:16], 'big')
-        signature_hash = int.from_bytes(signature_data[16:], 'big')
-        if data_hash == signature_hash and time.time_ns() - timestamp <= ttl or ttl == 0:
-            return True
-        return False
+    data_hash = sha256.hash(data)
+    signature_data = rsa.decrypt(bytes.fromhex(signature.decode('utf-8')), *pub_key)
+    timestamp = int.from_bytes(signature_data[0:8], 'big')
+    ttl = int.from_bytes(signature_data[8:16], 'big')
+    signature_hash = int.from_bytes(signature_data[16:], 'big')
+    if data_hash == signature_hash and time.time_ns() - timestamp <= ttl or ttl == 0:
+        return True
+    return False
 
 
 def gen_signed_diffie_hellman(dh_private_key: int, rsa_private_key: tuple, dh_group: tuple, message_id: int = 0) -> tuple[int,bytes]:
