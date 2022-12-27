@@ -32,12 +32,14 @@ def invert_sbox(s_box: list) -> list:
     """
     
     inverted_s_box = [[0 for column in s_box] for row in s_box]
-    for r in range(len(s_box)):
-        for c in range(len(s_box[r])):
-            inverted_s_box[s_box[r][c] >> 4][s_box[r][c] % 2**4] = (r << 4) | c
+    for row_index, row in enumerate(s_box):
+        for col_index, col in enumerate(row):
+            inverted_s_box[s_box[row_index][col_index] >> 4][s_box[row_index][col_index] % 2**4] = (row_index << 4) | col_index
     return inverted_s_box
 
+
 inverse_s_box = invert_sbox(s_box)
+
 
 def split_blocks(data: int) -> list:
     """Split an integer of any length into 128 bit blocks.
@@ -59,6 +61,7 @@ def split_blocks(data: int) -> list:
             blocks.append(data % 2**(128*(i+1)) >> 128*(i))
         blocks.reverse()
         return blocks
+
 
 def split_bytes(n: int, byte_count: int = 4) -> list:
     """Convert an integer of any length (default 4 bytes) into an array of bytes.
@@ -89,6 +92,7 @@ def split_bytes(n: int, byte_count: int = 4) -> list:
     while len(byte_array) < byte_count:
         byte_array.insert(0, 0x00000000)
     return byte_array
+
 
 def combine_byte_array(byte_array: list) -> int:
     """Combine an array of bytes (big endian) to a single integer.
@@ -146,6 +150,7 @@ def gf_mod_bytes(b: int, mod: int) -> int:
         mod_msb = get_msb(mod)
     return b
 
+
 def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
     """Calculate the product of two galois field polynomials represented as bytes
     (eg 171 = 0b10101011 = x^7 + x^5 + x^3 + x^1 + 1). This is defined as the 
@@ -173,7 +178,8 @@ for i in range(256):
     for j in range(256):
         row.append(gf_multiply_bytes(i, j))
     multiply_lookup.append(row)
-    
+
+
 def transpose_matrix(m: list) -> list:
     """Transpose a column/row major 4x4 matrix to row/column major. 
 
@@ -208,7 +214,8 @@ def sbox_lookup(b: int, sbox: list) -> int:
     upper_nibble = b >> 4
     lower_nibble = b % 2 ** 4
     return sbox[upper_nibble][lower_nibble]
-    
+
+
 def sub_bytes(state: list, inverse: bool = False) -> list:
     """Substitute all bytes in the state matrix with their corresponding elements in the
     AES s-box or inverse s-box.
@@ -301,6 +308,7 @@ def add_round_key(state: list, round_key: list) -> list:
         new_state.append(row)
     return new_state
 
+
 def int_to_word_array(x: int, words: int = 4) -> list:
     """Convert an integer of any length into an array of 4 byte (32 bit) words. 
 
@@ -363,6 +371,7 @@ def int_to_4x4_matrix(x: int) -> list:
     words = int_to_word_array(x, 4)
     return word_array_to_4x4_matrix(words)
 
+
 def matrix_to_int(m: list) -> int:
     """Concatenate a 4x4 column major byte matrix into a 16 byte (128 bit) integer.
 
@@ -405,6 +414,7 @@ def sub_word(word: int):
     """
     return combine_byte_array(sub_bytes([split_bytes(word)])[0])
 
+
 def rotate_word(word: int) -> int:
     """Perform a one byte right rotation on a 4 byte word
 
@@ -416,6 +426,7 @@ def rotate_word(word: int) -> int:
     """
     word_bytes = split_bytes(word)
     return combine_byte_array([word_bytes[1], word_bytes[2], word_bytes[3], word_bytes[0]])
+
 
 def expand_key(key: int) -> list:
     """Perform an aes key expansion on a given 256 bit key to produce 
@@ -443,6 +454,7 @@ def expand_key(key: int) -> list:
         schedule.append(temp ^ schedule[i - 8])
     return schedule
 
+
 def cipher_round(state: list, round_key: list) -> list:
     """Perform one round of the AES cipher algorithm
 
@@ -460,6 +472,7 @@ def cipher_round(state: list, round_key: list) -> list:
     state = add_round_key(state, round_key_matrix)
     return state
 
+
 def decipher_round(state: list, round_key: list) -> list:
     """Perform one round of the AES decipher algorithm
 
@@ -476,6 +489,7 @@ def decipher_round(state: list, round_key: list) -> list:
     state = add_round_key(state, round_key_matrix)
     state = mix_columns(state, True)
     return state
+
 
 def encrypt_block(key_schedule: list, block: int) -> int:
     """Encrypt a 128 bit message block using 14 AES rounds
@@ -496,6 +510,7 @@ def encrypt_block(key_schedule: list, block: int) -> int:
     state = shift_rows(state)
     state = add_round_key(state, word_array_to_4x4_matrix(key_schedule[56:60]))
     return matrix_to_int(state)
+
 
 def decrypt_block(key_schedule: list, block: int) -> int:
     """Decrypt one 128 bit ciphertext block using 14 AES rounds
@@ -543,6 +558,7 @@ def encrypt_ecb(data: bytes, key: int) -> bytes:
         shift -= 128
     return i_to_b(ciphertext)
 
+
 def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
     """Decrypt a bytestring using AES in Electronic Code Book mode.
 
@@ -564,6 +580,7 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
         shift -= 128
     
     return i_to_b(message)
+
 
 def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
@@ -600,6 +617,7 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
         shift -= 128                           # 128 bit long blocks
     
     return i_to_b(ciphertext)
+
 
 def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> bytes:
     """Decrypt a bytestring using AES in Cipher Block Chaining mode.
