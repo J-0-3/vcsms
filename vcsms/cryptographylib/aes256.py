@@ -104,7 +104,7 @@ def combine_byte_array(byte_array: list) -> int:
         int: The bytes combined into one integer
     """
     word = 0
-    for i,b in enumerate(byte_array):
+    for i, b in enumerate(byte_array):
         word |= b << 8 * (len(byte_array) - 1 - i)
     return word
 
@@ -636,7 +636,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     ciphertext_blocks = split_blocks(ciphertext_as_int)
     key_schedule = expand_key(key)
     message_blocks = []
-    for i,block in enumerate(ciphertext_blocks):
+    for i, block in enumerate(ciphertext_blocks):
         if i == 0:
             prev_output = initialisation_vector
         else:
