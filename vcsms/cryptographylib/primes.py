@@ -26,29 +26,29 @@ primes_up_to_1_million = sieve_of_eratosthenes(1000000) # calculated on module i
 
 
 def miller_rabin_primality_test(n: int, r: int):
-        if n % 2 == 0 or n == 1:
-            return False
-        d = n - 1
-        s = 0
-        # divide d as far as possible
-        while d % 2 == 0:
-            d //= 2
-            s += 1
+    if n % 2 == 0 or n == 1:
+        return False
+    d = n - 1
+    s = 0
+    # divide d as far as possible
+    while d % 2 == 0:
+        d //= 2
+        s += 1
 
-        for _ in range(r):
-            a = random.randrange(2, n - 1)
-            b = pow(a, d, n)
-            if b in {1, n - 1}:   # +- 1 (mod n)
-                continue
-            for _ in range(s):
-                check_next = False
-                b = pow(b, 2, n)
-                if b == n - 1: # likely is prime (as this means it divides n)
-                    check_next = True
-                    break
-            if not check_next:
-                return False
-        return True
+    for _ in range(r):
+        a = random.randrange(2, n - 1)
+        b = pow(a, d, n)
+        if b in {1, n - 1}:   # +- 1 (mod n)
+            continue
+        for _ in range(s):
+            check_next = False
+            b = pow(b, 2, n)
+            if b == n - 1: # likely is prime (as this means it divides n)
+                check_next = True
+                break
+        if not check_next:
+            return False
+    return True
 
 
 def is_prime(x: int):
