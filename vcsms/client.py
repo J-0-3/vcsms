@@ -1,13 +1,14 @@
+"""Defines the Client class for messaging other VCSMS clients."""
+
 import threading
 import os
 import random
 import re
-from typing import Union
 from queue import Queue
 
 from .cryptographylib import dhke, sha256, aes256
 from .cryptographylib.utils import i_to_b
-from .cryptographylib.exceptions import DecryptionFailureException 
+from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
@@ -17,302 +18,550 @@ from . import client_db
 from .logger import Logger
 
 INCOMING_MESSAGE_TYPES = {
-        # type       argc arg types         additional type info (encoding, base, etc)
-        "NewMessage": (3, [int, int, bytes], [10, 16]),
-        "MessageAccept": (3, [int, int, bytes], [10, 16]),
-        "MessageData": (3, [int, int, bytes], [10, 16]),
-        "KeyFound": (3, [str, int, int], ['utf-8', 16, 16]),
-        "KeyNotFound": (1, [str], ['utf-8']),
-        "IndexInUse": (1, [int], [10]),
-        "DecryptionFailure": (1, [int], [10]),
-        "InvalidSignature": (1, [int], [10]),
-        "NoSuchIndex": (1, [int], [10]),
-        "ResendAuthPacket": (1, [int], [10])
+    # type       argc arg types         additional type info (encoding, base, etc)
+    "NewMessage": (3, [int, int, bytes], [10, 16]),
+    "MessageAccept": (3, [int, int, bytes], [10, 16]),
+    "MessageData": (3, [int, int, bytes], [10, 16]),
+    "KeyFound": (3, [int, int, int], [10, 16, 16]),
+    "KeyNotFound": (1, [int], [10]),
+    "IndexInUse": (1, [int], [10]),
+    "DecryptionFailure": (1, [int], [10]),
+    "InvalidSignature": (1, [int], [10]),
+    "NoSuchIndex": (1, [int], [10]),
+    "ResendAuthPacket": (1, [int], [10]),
+    "UnknownMessageType": (1, [str], ['utf-8']),
+    "NotAllowed": (1, [str], ['utf-8'])
 }
 
 OUTGOING_MESSAGE_TYPES = {
-        "NewMessage": (3, [int, int, bytes], [10, 16]),
-        "MessageAccept": (3, [int, int, bytes], [10, 16]),
-        "MessageData": (3, [int, int, bytes], [10, 16]),
-        "IndexInUse": (1, [int], [10]),
-        "DecryptionFailure": (1, [int], [10]),
-        "InvalidSignature": (1, [int], [10]),
-        "NoSuchIndex": (1, [int], [10]),
-        "ResendAuthPacket": (1, [int], [10]),
-        "GetKey": (1, [str], ['utf-8'])
+    "NewMessage": (3, [int, int, bytes], [10, 16]),
+    "MessageAccept": (3, [int, int, bytes], [10, 16]),
+    "MessageData": (3, [int, int, bytes], [10, 16]),
+    "IndexInUse": (1, [int], [10]),
+    "DecryptionFailure": (1, [int], [10]),
+    "InvalidSignature": (1, [int], [10]),
+    "NoSuchIndex": (1, [int], [10]),
+    "ResendAuthPacket": (1, [int], [10]),
+    "GetKey": (2, [int, str], [10, 'utf-8']),
+    "PublicKeyMismatch": (3, [str, int, int], ['utf-8', 16, 16]),
+    "UnknownMessageType": (1, [str], ['utf-8']),
+    "NotAllowed": (1, [str], ['utf-8'])
 }
 
 
 class Client:
-    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str, master_password: str, logger: Logger):
-        self.ip = ip
-        self.port = port
-        self.fingerprint = fingerprint
-        self.server = None
-        self.app_dir = application_directory
-        self.pub = ()
-        self.priv = ()
-        self.dhke_group = dhke.group14_2048
-        self.messages = {}
-        self.client_pubkeys = {}
-        self.running = False
-        self.encryption_key = sha256.hash(master_password.encode('utf-8')) 
-        self.nickname_iv = 0
-        self.message_queue = Queue()
+    """
+    A VCSMS messaging client. Allows for communication with other VCSMS clients.
+
+    Remember to call the run() method before using the Client class.
+    """
+
+    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str,
+                 master_password: str, logger: Logger):
+        """Initialise a VCSMS messaging client.
+
+        Args:
+            ip (str): The ip address of the VCSMS server.
+            port (int): The port of the VCSMS server (specified in the server's .vcsms file).
+            fingerprint (str): The server's fingerprint (specified in the server's .vcsms file).
+            application_directory (str): Where to store files created by the client.
+            master_password (str): The master password used to encrypt data at rest.
+            logger (Logger): An instance of vcsms.logger.Logger used to log all application events.
+        """
+        self._ip = ip
+        self._port = port
+        self._fingerprint = fingerprint
+        self._server = None
+        self._app_dir = application_directory
+        self._pub = ()
+        self._priv = ()
+        self._dhke_group = dhke.group14_2048
+        self._messages = {}
+        self._key_requests = {}
+        self._client_pubkeys = {}
+        self._running = False
+        self._encryption_key = sha256.hash(master_password.encode('utf-8'))
+        self._nickname_iv = 0
+        self._message_queue = Queue()
         message_response_map = {
-            "KeyFound": self.handler_key_found,
-            "KeyNotFound": self.handler_key_not_found,
-            "NewMessage": self.handler_new_message,
-            "MessageAccept": self.handler_message_accept,
-            "MessageData": self.handler_message_data,
-            "IndexInUse": self.handler_index_in_use,
-            "ResendAuthPacket": self.handler_resend_auth_packet
+            "KeyFound": self._handler_key_found,
+            "KeyNotFound": self._handler_key_not_found,
+            "NewMessage": self._handler_new_message,
+            "MessageAccept": self._handler_message_accept,
+            "MessageData": self._handler_message_data,
+            "IndexInUse": self._handler_index_in_use,
+            "ResendAuthPacket": self._handler_resend_auth_packet
         }
-        self.message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
-        self.logger = logger
+        self._message_parser = MessageParser(
+            INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
+        self._logger = logger
 
     def receive(self) -> tuple[str, bytes]:
-        return self.message_queue.get()
+        """Block until a new message is available and then return it.
+
+        Returns:
+            tuple[str, bytes]: The message sender and data
+        """
+        return self._message_queue.get()
 
     def new_message(self) -> bool:
-        return not self.message_queue.empty()
+        """Check whether there is a new message available.
 
-    def add_contact(self, nickname: str, id: str):
-        db = self.db_connect()
-        id = id.strip().lower()
-        if re.fullmatch('^[0-9a-f]{64}$', id):
-            db.set_nickname(id, nickname)
+        Returns:
+            bool: Whether a new message is available
+        """
+        return not self._message_queue.empty()
+
+    def add_contact(self, nickname: str, client_id: str):
+        """Add a new contact with a (unique) nickname and client ID.
+
+        Args:
+            nickname (str): The nickname for the contact.
+            client_id (str): The contact's client ID (a 64 char hex string).
+        """
+        db = self._db_connect()
+        client_id = client_id.strip().lower()
+        if re.fullmatch('^[0-9a-f]{64}$', client_id):
+            db.set_nickname(client_id, nickname)
             db.close()
         else:
-            self.logger.log("Invalid ID Format", 1)
+            self._logger.log("Invalid ID Format", 1)
             db.close()
 
-    def get_contacts(self) -> list:
-        db = self.db_connect()
+    def get_contacts(self) -> list[str]:
+        """Get a list of all contacts known.
+
+        Returns:
+            list[str]: The nicknames of every stored contact.
+        """
+        db = self._db_connect()
         contacts = db.get_users()
         db.close()
         return contacts
 
     def get_messages(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
-        db = self.db_connect()
+        """Get the last *count* messages to/from the specified nickname.
+
+        Args:
+            nickname (str): The nickname to lookup.
+            count (int): The (maximum) number of messages to/from the specified nickname to return.
+
+        Returns:
+            list[tuple[bytes, bool]]: The last *count* messages to/from the client in time order
+                (oldest first) in the format (message, outgoing) where message is the raw message
+                and outgoing is a bool determining whether the message was sent or received.
+        """
+        db = self._db_connect()
         messages = db.get_messages_by_nickname(nickname, count)
         db.close()
-        return messages[::-1]  # return in time order (oldest first)
+        return messages[::-1]
 
     def send(self, recipient: str, message: bytes):
-        db = self.db_connect()
+        """Send a message to a given recipient.
+
+        Args:
+            recipient (str): The recipient (nickname or client ID) to send the message to.
+            message (bytes): The message to send.
+        """
+        db = self._db_connect()
         recipient_id = db.get_id(recipient)
-        if recipient_id is None and re.fullmatch('^[a-fA-F0-9]{64}$', recipient):
-            db.set_nickname(recipient, recipient)
-            recipient_id = recipient
+        if recipient_id is None:
+            if re.fullmatch('^[a-fA-F0-9]{64}$', recipient):
+                db.set_nickname(recipient, recipient)
+                recipient_id = recipient
+            else:
+                raise Exception(
+                    "No contact with the specified nickname exists and it does not look like a client ID.")
         db.insert_message(recipient_id, message, True)
         db.close()
-        dh_priv = random.randrange(1, self.dhke_group[1])
+        dh_priv = random.randrange(1, self._dhke_group[1])
         index = random.randrange(1, 2 ** 64)
-        while index in self.messages:
+        while index in self._messages:
             index = random.randrange(1, 2 ** 64)
-        dh_pub, dh_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, index)
-        self.messages[index] = {
+        dh_pub, dh_sig = signing.gen_signed_diffie_hellman(
+            dh_priv, self._priv, self._dhke_group, index)
+        self._messages[index] = {
             "dh_private": dh_priv,
             "encryption_key": 0,
             "data": message
         }
-        message = self.message_parser.construct_message(recipient_id, "NewMessage", index, dh_pub, dh_sig)
-        self.server.send(message)
+        message = self._message_parser.construct_message(
+            recipient_id, "NewMessage", index, dh_pub, dh_sig)
+        self._server.send(message)
 
     def run(self):
-        os.makedirs(os.path.join(self.app_dir, "keys"), exist_ok=True)
-        if os.path.exists(os.path.join(self.app_dir, "keytest")):
-            if not self.check_master_key():
-                raise Exception("Incorrect master key. Cannot run client program.")
+        """Connect to the VCSMS server and begin running the client program.
+        This should always be the first method called on the Client class."""
+        os.makedirs(os.path.join(self._app_dir, "keys"), exist_ok=True)
+        if os.path.exists(os.path.join(self._app_dir, "keytest")):
+            if not self._check_master_key():
+                raise ValueError(
+                    "Incorrect master key. Cannot run client program.")
         else:
-            self.create_master_key_test()
+            self._create_master_key_test()
 
-        if os.path.exists(os.path.join(self.app_dir, "nickname.iv")):
-            with open(os.path.join(self.app_dir, "nickname.iv"), 'r') as f:
+        if os.path.exists(os.path.join(self._app_dir, "nickname.iv")):
+            with open(os.path.join(self._app_dir, "nickname.iv"), 'r', encoding='utf-8') as f:
                 ciphertext_iv, ciphertext = f.read().split(':')
             ciphertext_iv = int(ciphertext_iv, 16)
             ciphertext = bytes.fromhex(ciphertext)
-            self.nickname_iv = int(aes256.decrypt_cbc(ciphertext, self.encryption_key, ciphertext_iv), 16)
+            self._nickname_iv = int(aes256.decrypt_cbc(
+                ciphertext, self._encryption_key, ciphertext_iv), 16)
         else:
-            self.nickname_iv = random.randrange(0, 2**128)
-            with open(os.path.join(self.app_dir, "nickname.iv"), 'w+') as f:
+            self._nickname_iv = random.randrange(0, 2**128)
+            with open(os.path.join(self._app_dir, "nickname.iv"), 'w+', encoding='utf-8') as f:
                 ciphertext_iv = random.randrange(0, 2**128)
-                ciphertext = aes256.encrypt_cbc(hex(self.nickname_iv)[2:].encode('utf-8'), self.encryption_key, ciphertext_iv)
+                ciphertext = aes256.encrypt_cbc(hex(self._nickname_iv)[2:].encode(
+                    'utf-8'), self._encryption_key, ciphertext_iv)
                 f.write(f"{hex(ciphertext_iv)[2:]}:{ciphertext.hex()}")
 
-        db = self.db_connect()
+        db = self._db_connect()
         db.setup()
         db.close()
         try:
-            self.pub = keys.load_key(os.path.join(self.app_dir, "client.pub"))
-            self.priv = keys.load_key(os.path.join(self.app_dir, "client.priv"))
+            self._pub = keys.load_key(
+                os.path.join(self._app_dir, "client.pub"))
+            self._priv = keys.load_key(
+                os.path.join(self._app_dir, "client.priv"))
         except FileNotFoundError:
-            self.pub, self.priv = keys.generate_keys(os.path.join(self.app_dir, "client.pub"), os.path.join(self.app_dir, "client.priv"))
+            self._pub, self._priv = keys.generate_keys(os.path.join(
+                self._app_dir, "client.pub"), os.path.join(self._app_dir, "client.priv"))
 
-        self.server = ServerConnection(self.ip, self.port, self.fingerprint, self.logger)
-        self.server.connect(self.pub, self.priv, skip_fp_verify=False)
-        self.running = True
-        t_incoming = threading.Thread(target=self.incoming_thread, args=())
+        self._server = ServerConnection(
+            self._ip, self._port, self._fingerprint, self._logger)
+        self._server.connect(self._pub, self._priv)
+        self._running = True
+        t_incoming = threading.Thread(target=self._incoming_thread, args=())
         t_incoming.start()
 
     def quit(self):
-        self.server.send(self.message_parser.construct_message("0", "Quit"))
-        self.running = False
-        self.server.close()
+        """Close the connection with the server and shutdown the client program."""
+        self._server.send(self._message_parser.construct_message("0", "Quit"))
+        self._running = False
+        self._server.close()
 
     def get_id(self) -> str:
-        return keys.fingerprint(self.pub)
+        """Get the client ID associated with this client instance.
 
-    def create_master_key_test(self):
-        with open(os.path.join(self.app_dir, "keytest"), 'w+') as f:
+        Returns:
+            str: The client ID (pub key fingerprint) corresponding with this instance of the client.
+        """
+        return keys.fingerprint(self._pub)
+
+    def _request_key(self, client_id: str):
+        request_index = random.randrange(1, 2**64)
+        while request_index in self._key_requests:
+            request_index = random.randrange(1, 2**64)
+        self._key_requests[request_index] = client_id
+        self._server.send(self._message_parser.construct_message(
+            "0", "GetKey", request_index, client_id))
+
+    def _create_master_key_test(self):
+        """Create a file containing some random plaintext and ciphertext
+        encrypted with the currently set master key
+        for checking the correctness of the master key in future runs.
+        This should only get run on the first run of the client program."""
+        with open(os.path.join(self._app_dir, "keytest"), 'w+', encoding='utf-8') as f:
             data = random.randbytes(1024)
-            iv = random.randrange(0, 2**128)
-            encrypted_data = aes256.encrypt_cbc(data, self.encryption_key, iv)
-            f.write(f"{data.hex()}:{hex(iv)[2:]}:{encrypted_data.hex()}")
+            aes_iv = random.randrange(0, 2**128)
+            encrypted_data = aes256.encrypt_cbc(data, self._encryption_key, aes_iv)
+            f.write(f"{data.hex()}:{hex(aes_iv)[2:]}:{encrypted_data.hex()}")
 
-    def check_master_key(self) -> bool:
-        with open(os.path.join(self.app_dir, "keytest"), 'r') as f:
-            plaintext, iv, ciphertext = f.read().split(':')
+    def _check_master_key(self) -> bool:
+        """Check whether the currently set master key is correct
+        (corresponds with the original master key that was set on first run).
+
+        Returns:
+            bool: Whether the master key is correct
+        """
+        with open(os.path.join(self._app_dir, "keytest"), 'r', encoding='utf-8') as f:
+            plaintext, aes_iv, ciphertext = f.read().split(':')
         plaintext = bytes.fromhex(plaintext)
-        iv = int(iv, 16)
+        aes_iv = int(aes_iv, 16)
         ciphertext = bytes.fromhex(ciphertext)
-        if ciphertext == aes256.encrypt_cbc(plaintext, self.encryption_key, iv):
+        if ciphertext == aes256.encrypt_cbc(plaintext, self._encryption_key, aes_iv):
             return True
         return False
 
     # methods for threads
-    def incoming_thread(self):
-        while self.running:
-            if self.server.new_msg():
-                msg = self.server.read()
-                t_process = threading.Thread(target=self.msg_process_thread, args=(msg,))
-                t_process.start()    
+    def _incoming_thread(self):
+        """The function run by the incoming thread. 
+        Keeps checking for new messages and processes them on a new thread as they arrive.
+        """
+        while self._running:
+            if self._server.new_msg():
+                msg = self._server.read()
+                t_process = threading.Thread(
+                    target=self._msg_process_thread, args=(msg,))
+                t_process.start()
 
-    def msg_process_thread(self, data: bytes):
+    def _msg_process_thread(self, data: bytes):
+        """The function run by the processing thread for each incoming message.
+        Parses the message data and runs the corresponding handler function.
+
+        Args:
+            data (bytes): The raw message bytes.
+        """
         try:
-            sender, message_type, message_values = self.message_parser.parse_message(data)
-        except MessageParseException as e:
-            self.logger.log(str(e), 1)
+            sender, message_type, message_values = self._message_parser.parse_message(
+                data)
+        except MessageParseException as parse_exception:
+            self._logger.log(str(parse_exception), 1)
 
-        response = self.message_parser.handle(sender, message_type, message_values)
+        response = self._message_parser.handle(
+            sender, message_type, message_values)
         if response:
-            self.server.send(response)
+            self._server.send(response)
 
     # message type handlers
 
-    def handler_key_found(self, _, values: list) -> None:
-        db = self.db_connect()
-        db.save_key(values[0], (values[1], values[2]))
-        db.close()
+    def _handler_key_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
+        """Handler function for the KeyFound message type.
 
-    def handler_key_not_found(self, _, values: list) -> None:
-        self.logger.log(f"Server could not locate public key for {values[0]}", 2)
+        Args:
+            sender (str): The client ID which sent the message
+            values (list): The parameters of the message (request index, exponent, modulus)
 
-    def handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
+        Returns:
+            None | tuple[str, tuple]: None if successful
+                PublicKeyMismatch: The supplied key's fingerprint does not match the client ID.
+                NotAllowed: The message did not originate from the server.
+                NoSuchIndex: The request index does not match any existing key request
+        """
+        request_index, exponent, modulus = values
+
+        if sender == '0':
+            if request_index in self._key_requests:
+                client_id = self._key_requests[request_index]
+                self._key_requests.pop(request_index)
+                if keys.fingerprint((exponent, modulus)) == client_id:
+                    db = self._db_connect()
+                    db.save_key(client_id, (exponent, modulus))
+                    db.close()
+                    return None
+                return "PublicKeyMismatch", (client_id, exponent, modulus)
+            return "NoSuchIndex", (request_index, )
+        return "NotAllowed", ("KeyFound", )
+
+    def _handler_key_not_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
+        """Handler function for the KeyNotFound message type.
+
+        Args:
+            values (list): The parameters of the message (client ID)
+
+        Returns:
+            None | tuple[str, tuple]: None if successful.
+                NoSuchIndex: The request index does not match any existing key request.
+                NotAllowed: The message did not originate from the server.
+        """
+        if sender == '0':
+            req_index = values[0]
+            if req_index in self._key_requests:
+                client_id = self._key_requests[req_index]
+                self._logger.log(
+                    f"Server could not locate key for {client_id}", 2)
+                self._key_requests.pop(req_index)
+                return None
+            return "NoSuchIndex", (req_index, )
+        return "NotAllowed", ("KeyNotFound", )
+
+    def _handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
+        """Handler function for the NewMessage message type.
+
+        Args:
+            sender (str): The client ID who sent the message.
+            values (list): The parameters of the message
+                (message index (int), diffie hellman key (int), diffie hellman signature (bytes))
+
+        Returns:
+            tuple[str, tuple]: MessageAccept if successful.
+                IndexInUse: The message index is already being used by another message in process.
+                ResendAuthPacket: The sender is unknown and authentication needs to be retried
+                    after the public key is obtained (also sends a GetKey request).
+                InvalidSignature: The diffie hellman public key was incorrectly signed.
+        """
         message_index, sender_dh_pub, sender_dh_sig = values
 
-        if message_index in self.messages:
-            self.logger.log(f"Message from {sender} requested use of already-in-use index {message_index}", 3) 
+        if message_index in self._messages:
+            self._logger.log(
+                f"Message from {sender} requested use of already-in-use index {message_index}", 3)
             return "IndexInUse", (message_index, )
 
-        db = self.db_connect()
+        db = self._db_connect()
         if not db.user_known(sender):
             db.close()
-            self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
-            self.logger.log(f"Message from unknown user {sender}", 3)
+            self._request_key(sender)
+            self._logger.log(f"Message from unknown user {sender}", 3)
             return "ResendAuthPacket", (message_index, )
 
-        signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
+        signature_data = hex(sender_dh_pub)[2:].encode(
+            'utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
-            self.logger.log(f"Invalid Diffie Hellman signature from {sender}", 2)
+            self._logger.log(
+                f"Invalid Diffie Hellman signature from {sender}", 2)
             return "InvalidSignature", (message_index, )
 
         db.close()
-        dh_priv = random.randrange(1, self.dhke_group[1])
-        dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(dh_priv, self.priv, self.dhke_group, message_index)
-        shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
+        dh_priv = random.randrange(1, self._dhke_group[1])
+        dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(
+            dh_priv, self._priv, self._dhke_group, message_index)
+        shared_secret = dhke.calculate_shared_key(
+            dh_priv, sender_dh_pub, self._dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
 
-        self.messages[message_index] = {"dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
+        self._messages[message_index] = {
+            "dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
-    def handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
+    def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
+        """Handler for the MessageAccept message type.
+
+        Args:
+            sender (str): The client ID who sent the message.
+            values (list): The message parameters
+                (message index (int), diffie hellman key (int), diffie hellman signature (bytes))
+
+        Returns:
+            tuple[str, tuple]: MessageData if successful.
+                NoSuchIndex: The message index does not correspond to any in process message.
+                ResendAuthPacket: The sender is unknown and authentication needs to be retried
+                    after the public key is obtained (also sends a GetKey request).
+                InvalidSignature: The diffie hellman public key was incorrectly signed.
+        """
         message_index, sender_dh_pub, sender_dh_sig = values
 
-        if message_index not in self.messages:
-            self.logger.log(f"Message acceptance from {sender} for non-existent message {message_index}", 2)
+        if message_index not in self._messages:
+            self._logger.log(
+                f"Message acceptance from {sender} for non-existent message {message_index}", 2)
             return "NoSuchIndex", (message_index, )
-        db = self.db_connect()
+        db = self._db_connect()
         if not db.user_known(sender):
-            self.server.send(self.message_parser.construct_message("0", "GetKey", sender))
+            self._request_key(sender)
             db.close()
-            self.logger.log(f"Message to unknown user {sender}", 2)
+            self._logger.log(f"Message to unknown user {sender}", 2)
             return "ResendAuthPacket", (message_index, )
 
-        signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
+        signature_data = hex(sender_dh_pub)[2:].encode(
+            'utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
-            self.logger.log("Invalid Diffie Hellman public key signature from {sender}", 2)
+            self._logger.log(
+                "Invalid Diffie Hellman public key signature from {sender}", 2)
             return "InvalidSignature", (message_index, )
         db.close()
 
-        dh_priv = self.messages[message_index]["dh_private"]
-        shared_secret = dhke.calculate_shared_key(dh_priv, sender_dh_pub, self.dhke_group)
+        dh_priv = self._messages[message_index]["dh_private"]
+        shared_secret = dhke.calculate_shared_key(
+            dh_priv, sender_dh_pub, self._dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
-        plaintext = self.messages[message_index]["data"]
+        plaintext = self._messages[message_index]["data"]
         aes_iv = random.randrange(2, 2 ** 128)
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
-        self.messages.pop(message_index)
+        self._messages.pop(message_index)
         return "MessageData", (message_index, aes_iv, ciphertext)
 
-    def handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
+    def _handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
+        """Handler function for the MessageData message type.
+
+        Args:
+            sender (str): The client ID who sent the message. 
+            values (list): The parameters of the message (message index (int), AES initialisation vector (int), ciphertext (bytes)) 
+
+        Returns:
+            tuple[str, tuple] | None: None if successful.
+                NoSuchIndex: The message index does not correspond to any in process message.
+                DecryptionFailure: The message ciphertext was unable to be decrypted.
+        """
         message_index, aes_iv, ciphertext = values
-        if message_index not in self.messages:
-            self.logger.log(f"Message data from {sender} for non-existent message {message_index}", 2)
+        if message_index not in self._messages:
+            self._logger.log(
+                f"Message data from {sender} for non-existent message {message_index}", 2)
             return "NoSuchIndex", (message_index, )
-        encryption_key = self.messages[message_index]["encryption_key"]
+        encryption_key = self._messages[message_index]["encryption_key"]
         try:
             plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
         except DecryptionFailureException:
-            self.logger.log(f"Failed to decrypt message from {sender}", 1)
-            return "DecryptionFailure", (message_index, ) 
-        self.messages.pop(message_index)
-        db = self.db_connect()
+            self._logger.log(f"Failed to decrypt message from {sender}", 1)
+            return "DecryptionFailure", (message_index, )
+        self._messages.pop(message_index)
+        db = self._db_connect()
         db.insert_message(sender, plaintext, False)
         nickname = db.get_nickname(sender)
         if nickname is None:
-            db.set_nickname(sender, sender) 
-            self.message_queue.put((sender, plaintext))
+            db.set_nickname(sender, sender)
+            self._message_queue.put((sender, plaintext))
         else:
-            self.message_queue.put((nickname, plaintext))
-        db.close()        
+            self._message_queue.put((nickname, plaintext))
+        db.close()
         return None
 
-    def handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
-        message_index = values[0]    
+    def _handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
+        """Handler function for the IndexInUse message type.
 
-        self.logger.log(f"Requested message index {message_index} from {sender} but it was already in use", 3)
-        message = self.messages[message_index]
-        new_id = random.randrange(1, 2 ** 64)
-        self.messages.pop(message_index)
-        self.messages[new_id] = message
-        dh_private = message["dh_private"]
-        dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, new_id)
-        return "NewMessage", (new_id, dh_public, dh_signature)
+        Args:
+            sender (str): The client ID who sent the message. 
+            values (list): The parameters of the message (message index (int))
 
-    def handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
+        Returns:
+            tuple[str, tuple]: NewMessage if successful 
+        """
         message_index = values[0]
 
-        self.logger.log(f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
-        message = self.messages[message_index]
+        self._logger.log(
+            f"Requested message index {message_index} from {sender} but it was already in use", 3)
+        message = self._messages[message_index]
+        new_id = random.randrange(1, 2 ** 64)
+        self._messages.pop(message_index)
+        self._messages[new_id] = message
         dh_private = message["dh_private"]
-        dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self.priv, self.dhke_group, message_index)
+        dh_public, dh_signature = signing.gen_signed_diffie_hellman(
+            dh_private, self._priv, self._dhke_group, new_id)
+        return "NewMessage", (new_id, dh_public, dh_signature)
+
+    def _handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
+        """Handler function for the ResendAuthPacket message type.
+
+        Args:
+            sender (str): The client ID who sent the message. 
+            values (list): The parameters of the message (message index (int)) 
+
+        Returns:
+            tuple[str, tuple]: NewMessage or MessageAccept depending on the message state.
+        """
+        message_index = values[0]
+
+        self._logger.log(
+            f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
+        message = self._messages[message_index]
+        dh_private = message["dh_private"]
+        dh_public, dh_signature = signing.gen_signed_diffie_hellman(
+            dh_private, self._priv, self._dhke_group, message_index)
         if message["encryption_key"]:
             return "MessageAccept", (message_index, dh_public, dh_signature)
-        return "NewMessage", (message_index, dh_public, dh_signature)  
+        return "NewMessage", (message_index, dh_public, dh_signature)
 
-    def db_connect(self):
-        db = client_db.Client_DB(os.path.join(self.app_dir, "client.db"), os.path.join(self.app_dir, "keys") + "/", self.encryption_key, self.nickname_iv)
+    def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:
+        """Handler function for unknown message types.
+
+        Args:
+            sender (str): The client ID which sent the message. 
+            message_type (str): The unknown message type.
+            values (list): The parameters of the message.
+
+        Returns:
+            tuple[str, tuple]: UnknownMessageType 
+        """
+        self._logger.log(
+            f"{sender} sent a message of unknown type {message_type} with values {values}", 2)
+        return "UnknownMessageType", (message_type, )
+
+    def _db_connect(self) -> client_db.Client_DB:
+        """Connect to the client database.
+
+        Returns:
+            Client_DB: A connection to the client database 
+        """
+        db = client_db.Client_DB(os.path.join(self._app_dir, "client.db"), os.path.join(
+            self._app_dir, "keys") + "/", self._encryption_key, self._nickname_iv)
         return db

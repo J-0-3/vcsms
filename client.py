@@ -113,16 +113,19 @@ class Application:
                 self.draw_left_panel()
                 self.draw_main_panel()
 
-            key = stdscr.getch()
+            try:
+                key = stdscr.getkey()
+            except curses.error:
+                key = ""
             match key:
-                case ord('q'):
+                case 'q':
                     self.client.quit()
                     break
-                case ord('a'):
+                case 'a':
                     self.add_new_client()
-                case ord('n'):
+                case 'n':
                     self.send_message()
-                case ord('l'):
+                case 'l':
                     contacts = self.client.get_contacts()
                     current_contact_index = contacts.index(self.focused_user)
                     next_index = (current_contact_index + 1) % len(contacts)
@@ -130,7 +133,7 @@ class Application:
                     self.new_message[self.focused_user] = False
                     self.draw_left_panel()
                     self.draw_main_panel()
-                case ord('h'):
+                case 'h':
                     contacts = self.client.get_contacts()
                     current_contact_index = contacts.index(self.focused_user)
                     prev_index = (current_contact_index - 1) % len(contacts)
@@ -147,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--directory", type=str, default="vcsms", help="Where to store application-generated files")
     parser.add_argument("-p", "--password", type=str, help="The application master password")
     args = parser.parse_args()
-    with open(args.config, 'r') as conf:
+    with open(args.config, 'r', encoding='utf-8') as conf:
         serverconf = json.load(conf)
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
     if args.password:
