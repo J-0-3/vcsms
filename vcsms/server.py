@@ -13,7 +13,7 @@ from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
 
 INCOMING_MESSAGE_TYPES = {
-    "GetKey": (1,[str],['utf-8']),
+    "GetKey": (1, [str], ['utf-8']),
     "Quit": (0, [], [])
 }
 
