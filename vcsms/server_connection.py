@@ -28,7 +28,6 @@ class ServerConnection:
         self.connected = False
         self._busy = False
 
-
     def _handshake(self, pub_key, priv_key, dhke_group=dhke.group16_4096, skip_fp_verify=False):
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
@@ -67,7 +66,6 @@ class ServerConnection:
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self._encryption_key = sha256.hash(utils.i_to_b(shared_key))
 
-
     def connect(self, pub_key: tuple[int, int], priv_key: tuple[int, int], skip_fp_verify: bool = False):
         self.connected = True
         self._socket.connect(self.ip, self.port)
@@ -77,7 +75,6 @@ class ServerConnection:
         t_out = threading.Thread(target=self._out_thread, args=())
         t_in.start()
         t_out.start()
-
 
     def _in_thread(self):
         while self.connected:        
@@ -100,7 +97,6 @@ class ServerConnection:
                     continue
                 self._in_queue.put(message)
 
-
     def _out_thread(self):
         while self.connected:
             if not self._out_queue.empty():
@@ -110,7 +106,6 @@ class ServerConnection:
                 encrypted = aes256.encrypt_cbc(message, self._encryption_key, iv)
                 self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
                 self._busy = False
-
 
     def close(self):
         self._logger.log("Trying to close connection to server", 3)
@@ -122,14 +117,11 @@ class ServerConnection:
                 self._logger.log("Closed connection to server", 2)
                 break
 
-
     def send(self, data: bytes):
         self._out_queue.put(data)
 
-
     def read(self) -> bytes:
         return self._in_queue.get()
-
 
     def new_msg(self) -> bool:
         return not self._in_queue.empty()
