@@ -42,6 +42,7 @@ OUTGOING_MESSAGE_TYPES = {
         "GetKey": (1, [str], ['utf-8'])
 }
 
+
 class Client:
     def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str, master_password: str, logger: Logger):
         self.ip = ip
