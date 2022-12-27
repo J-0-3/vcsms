@@ -1,5 +1,6 @@
 import math
 
+
 def get_msb(x: int) -> int:
     """Get the index of the most significant bit of an integer
 
@@ -10,12 +11,7 @@ def get_msb(x: int) -> int:
         int: The index (0 -> log x) of the most significant bit 
     """
     return x.bit_length() - 1
-    cur = x
-    msb = 0
-    while cur != 0:
-        cur >>= 1
-        msb += 1
-    return msb - 1
+
 
 def i_to_b(n: int) -> bytes:
     """Convert an int to a byte representation
