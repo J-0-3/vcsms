@@ -162,6 +162,7 @@ class Server:
         self.logger.log(f"User {id} closed the connection", 1)
         self.sockets.pop(id)
 
+    @staticmethod
     def out_thread(self, sock: NonStreamSocket, outbox: Queue, encryption_key: int):
         while sock.connected():
             if not outbox.empty():
