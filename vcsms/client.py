@@ -97,7 +97,7 @@ class Client:
         db = self.db_connect()
         messages = db.get_messages_by_nickname(nickname, count)
         db.close()
-        return messages[::-1] # return in time order (oldest first)
+        return messages[::-1]  # return in time order (oldest first)
 
     def send(self, recipient: str, message: bytes):
         db = self.db_connect()
