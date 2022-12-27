@@ -103,7 +103,7 @@ def gen_keypair(length: int = 2048):
     """
     while True:
         if length % 2 != 0:
-            raise("INVALID KEYLENGTH. MUST BE EVEN.")
+            raise ValueError("INVALID KEYLENGTH. MUST BE EVEN.")
         
         p = random.randrange(1, 2**(length//2))
         while not primes.is_prime(p):
