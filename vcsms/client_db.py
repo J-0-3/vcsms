@@ -1,5 +1,4 @@
 import sqlite3
-import math
 import os
 import random
 from . import keys
