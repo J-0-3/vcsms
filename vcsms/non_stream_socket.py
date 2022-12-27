@@ -63,4 +63,3 @@ class NonStreamSocket:
         self.open = True
         t_in.start()
         t_life.start()
-
