@@ -49,7 +49,7 @@ OUTGOING_MESSAGE_TYPES = {
 }
 
 
-class Client:
+class EvilClient:
     """
     A VCSMS messaging client. Allows for communication with other VCSMS clients.
 
@@ -83,6 +83,7 @@ class Client:
         self._encryption_key = sha256.hash(master_password.encode('utf-8'))
         self._nickname_iv = 0
         self._message_queue = Queue()
+        self._spooftargets = {}
         message_response_map = {
             "KeyFound": self._handler_key_found,
             "KeyNotFound": self._handler_key_not_found,
@@ -156,7 +157,7 @@ class Client:
         db.close()
         return messages[::-1]
 
-    def send(self, recipient: str, message: bytes):
+    def send(self, recipient: str, sender: str, message: bytes):
         """Send a message to a given recipient.
 
         Args:
@@ -185,6 +186,7 @@ class Client:
             "encryption_key": 0,
             "data": message
         }
+        self._spooftargets[index] = sender.encode('utf-8')
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
         self._server.send(message)
@@ -226,7 +228,7 @@ class Client:
         except FileNotFoundError:
             self._pub, self._priv = keys.generate_keys(os.path.join(
                 self._app_dir, "client.pub"), os.path.join(self._app_dir, "client.priv"))
-
+        print(f"My ID is: {keys.fingerprint(self._pub)}")
         self._server = ServerConnection(
             self._ip, self._port, self._fingerprint, self._logger)
         self._server.connect(self._pub, self._priv)
@@ -458,7 +460,8 @@ class Client:
         aes_iv = random.randrange(2, 2 ** 128)
         ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
         self._messages.pop(message_index)
-        return "MessageData", (message_index, aes_iv, ciphertext)
+        spoofed_sender = self._spooftargets[message_index]
+        return "MessageData", (message_index, aes_iv, spoofed_sender + ciphertext)
 
     def _handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
         """Handler function for the MessageData message type.
