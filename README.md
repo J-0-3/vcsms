@@ -5,5 +5,5 @@ The cryptographic algorithms used in the app (RSA, Diffie Hellman, AES and SHA) 
  so should ***NOT*** be used when security is genuinely a deep concern (if your messages do get hacked by a hostile nation state I will not be responsible). 
  
  The app uses curses for its GUI but the library's API is designed to be simple to use if one should wish to implement their own client program (start 
- with [vcsms.client](vcsms/client.py) and read the docs).
+ with [vcsms.client](vcsms/client.py) and read the docs). Treat the built in curses client program as an example.
  
