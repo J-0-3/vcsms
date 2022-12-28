@@ -21,7 +21,7 @@ if __name__ == "__main__":
         pub, priv = keys.generate_keys(os.path.join(server_directory, "server.pub"), os.path.join(server_directory, "server.priv"))
 
     if os.path.exists(os.path.join(server_directory, "server.conf")):
-        with open(os.path.join(server_directory, "server.conf")) as f:
+        with open(os.path.join(server_directory, "server.conf"), encoding='utf-8') as f:
             config = json.load(f)
     else:
         config = {
@@ -30,7 +30,7 @@ if __name__ == "__main__":
         }
 
     if args.config_out:
-        with open(args.config_out, 'w') as f:
+        with open(args.config_out, 'w', encoding='utf-8') as f:
             json.dump({
                 "port": config["port"],
                 "fingerprint": keys.fingerprint(pub)

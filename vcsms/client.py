@@ -181,6 +181,7 @@ class Client:
         dh_pub, dh_sig = signing.gen_signed_diffie_hellman(
             dh_priv, self._priv, self._dhke_group, index)
         self._messages[index] = {
+            "client_id": recipient_id,
             "dh_private": dh_priv,
             "encryption_key": 0,
             "data": message
@@ -381,7 +382,6 @@ class Client:
                 InvalidSignature: The diffie hellman public key was incorrectly signed.
         """
         message_index, sender_dh_pub, sender_dh_sig = values
-
         if message_index in self._messages:
             self._logger.log(
                 f"Message from {sender} requested use of already-in-use index {message_index}", 3)
@@ -411,7 +411,10 @@ class Client:
         encryption_key = sha256.hash(i_to_b(shared_secret))
 
         self._messages[message_index] = {
-            "dh_private": dh_priv, "encryption_key": encryption_key, "data": b''}
+            "client_id": sender,
+            "dh_private": dh_priv,
+            "encryption_key": encryption_key,
+            "data": b''}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -428,6 +431,7 @@ class Client:
                 ResendAuthPacket: The sender is unknown and authentication needs to be retried
                     after the public key is obtained (also sends a GetKey request).
                 InvalidSignature: The diffie hellman public key was incorrectly signed.
+                NotAllowed: The message index is in use by a different client to the sender.
         """
         message_index, sender_dh_pub, sender_dh_sig = values
 
@@ -435,31 +439,31 @@ class Client:
             self._logger.log(
                 f"Message acceptance from {sender} for non-existent message {message_index}", 2)
             return "NoSuchIndex", (message_index, )
-        db = self._db_connect()
-        if not db.user_known(sender):
-            self._request_key(sender)
-            db.close()
-            self._logger.log(f"Message to unknown user {sender}", 2)
-            return "ResendAuthPacket", (message_index, )
+        if sender == self._messages[message_index]["client_id"]:
+            db = self._db_connect()
+            if not db.user_known(sender):
+                self._request_key(sender)
+                db.close()
+                self._logger.log(f"Message to unknown user {sender}", 2)
+                return "ResendAuthPacket", (message_index, )
 
-        signature_data = hex(sender_dh_pub)[2:].encode(
-            'utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
-        if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+            signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
+            if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+                db.close()
+                self._logger.log("Invalid Diffie Hellman public key signature from {sender}", 2)
+                return "InvalidSignature", (message_index, )
             db.close()
-            self._logger.log(
-                "Invalid Diffie Hellman public key signature from {sender}", 2)
-            return "InvalidSignature", (message_index, )
-        db.close()
 
-        dh_priv = self._messages[message_index]["dh_private"]
-        shared_secret = dhke.calculate_shared_key(
-            dh_priv, sender_dh_pub, self._dhke_group)
-        encryption_key = sha256.hash(i_to_b(shared_secret))
-        plaintext = self._messages[message_index]["data"]
-        aes_iv = random.randrange(2, 2 ** 128)
-        ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
-        self._messages.pop(message_index)
-        return "MessageData", (message_index, aes_iv, ciphertext)
+            dh_priv = self._messages[message_index]["dh_private"]
+            shared_secret = dhke.calculate_shared_key(
+                dh_priv, sender_dh_pub, self._dhke_group)
+            encryption_key = sha256.hash(i_to_b(shared_secret))
+            plaintext = self._messages[message_index]["data"]
+            aes_iv = random.randrange(2, 2 ** 128)
+            ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
+            self._messages.pop(message_index)
+            return "MessageData", (message_index, aes_iv, ciphertext)
+        return "NotAllowed", ("MessageAccept", )
 
     def _handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
         """Handler function for the MessageData message type.
@@ -472,29 +476,33 @@ class Client:
             tuple[str, tuple] | None: None if successful.
                 NoSuchIndex: The message index does not correspond to any in process message.
                 DecryptionFailure: The message ciphertext was unable to be decrypted.
+                NotAllowed: The message index is in use by a different client id to the sender.
         """
         message_index, aes_iv, ciphertext = values
         if message_index not in self._messages:
             self._logger.log(
                 f"Message data from {sender} for non-existent message {message_index}", 2)
             return "NoSuchIndex", (message_index, )
-        encryption_key = self._messages[message_index]["encryption_key"]
-        try:
-            plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
-        except DecryptionFailureException:
-            self._logger.log(f"Failed to decrypt message from {sender}", 1)
-            return "DecryptionFailure", (message_index, )
-        self._messages.pop(message_index)
-        db = self._db_connect()
-        db.insert_message(sender, plaintext, False)
-        nickname = db.get_nickname(sender)
-        if nickname is None:
-            db.set_nickname(sender, sender)
-            self._message_queue.put((sender, plaintext))
-        else:
-            self._message_queue.put((nickname, plaintext))
-        db.close()
-        return None
+
+        if sender == self._messages[message_index]["client_id"]:
+            encryption_key = self._messages[message_index]["encryption_key"]
+            try:
+                plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
+            except DecryptionFailureException:
+                self._logger.log(f"Failed to decrypt message from {sender}", 1)
+                return "DecryptionFailure", (message_index, )
+            self._messages.pop(message_index)
+            db = self._db_connect()
+            db.insert_message(sender, plaintext, False)
+            nickname = db.get_nickname(sender)
+            if nickname is None:
+                db.set_nickname(sender, sender)
+                self._message_queue.put((sender, plaintext))
+            else:
+                self._message_queue.put((nickname, plaintext))
+            db.close()
+            return None
+        return "NotAllowed", ("MessageData", )
 
     def _handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
         """Handler function for the IndexInUse message type.
@@ -504,20 +512,21 @@ class Client:
             values (list): The parameters of the message (message index (int))
 
         Returns:
-            tuple[str, tuple]: NewMessage if successful 
+            tuple[str, tuple]: NewMessage if successful
+                NotAllowed: The message index is in use by a different client id to the sender
         """
         message_index = values[0]
 
-        self._logger.log(
-            f"Requested message index {message_index} from {sender} but it was already in use", 3)
-        message = self._messages[message_index]
-        new_id = random.randrange(1, 2 ** 64)
-        self._messages.pop(message_index)
-        self._messages[new_id] = message
-        dh_private = message["dh_private"]
-        dh_public, dh_signature = signing.gen_signed_diffie_hellman(
-            dh_private, self._priv, self._dhke_group, new_id)
-        return "NewMessage", (new_id, dh_public, dh_signature)
+        if sender == self._messages[message_index]["client_id"]:
+            self._logger.log(f"Requested message index {message_index} from {sender} but it was already in use", 3)
+            message = self._messages[message_index]
+            new_id = random.randrange(1, 2 ** 64)
+            self._messages.pop(message_index)
+            self._messages[new_id] = message
+            dh_private = message["dh_private"]
+            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self._priv, self._dhke_group, new_id)
+            return "NewMessage", (new_id, dh_public, dh_signature)
+        return "NotAllowed", ("IndexInUse", )
 
     def _handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
         """Handler function for the ResendAuthPacket message type.
@@ -528,32 +537,32 @@ class Client:
 
         Returns:
             tuple[str, tuple]: NewMessage or MessageAccept depending on the message state.
+                NotAllowed: The message index is in use by a different client ID to the sender.
         """
         message_index = values[0]
 
-        self._logger.log(
-            f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
-        message = self._messages[message_index]
-        dh_private = message["dh_private"]
-        dh_public, dh_signature = signing.gen_signed_diffie_hellman(
-            dh_private, self._priv, self._dhke_group, message_index)
-        if message["encryption_key"]:
-            return "MessageAccept", (message_index, dh_public, dh_signature)
-        return "NewMessage", (message_index, dh_public, dh_signature)
+        if sender == self._messages[message_index]["client_id"]:
+            self._logger.log(f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
+            message = self._messages[message_index]
+            dh_private = message["dh_private"]
+            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self._priv, self._dhke_group, message_index)
+            if message["encryption_key"]:
+                return "MessageAccept", (message_index, dh_public, dh_signature)
+            return "NewMessage", (message_index, dh_public, dh_signature)
+        return "NotAllowed", ("ResentAuthPacket", )
 
     def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:
         """Handler function for unknown message types.
 
         Args:
-            sender (str): The client ID which sent the message. 
+            sender (str): The client ID which sent the message.
             message_type (str): The unknown message type.
             values (list): The parameters of the message.
 
         Returns:
-            tuple[str, tuple]: UnknownMessageType 
+            tuple[str, tuple]: UnknownMessageType
         """
-        self._logger.log(
-            f"{sender} sent a message of unknown type {message_type} with values {values}", 2)
+        self._logger.log(f"{sender} sent a message of unknown type {message_type} with values {values}", 2)
         return "UnknownMessageType", (message_type, )
 
     def _db_connect(self) -> client_db.Client_DB:
