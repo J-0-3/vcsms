@@ -276,7 +276,7 @@ if __name__ == "__main__":
     if args.password:
         vcsms_client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
     else:
-        password = input("Enter master password")
+        password = input("Enter master password: ")
         vcsms_client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, password, logger)
     try:
         vcsms_client.run()
