@@ -3,16 +3,13 @@ import argparse
 import os
 import json
 
-from vcsms.malicious_server import EvilServer
+from vcsms.server import Server
 from vcsms.logger import Logger
 from vcsms import keys
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=str, help="The directory in which to store all the server's files")
-    parser.add_argument("attacker_ip", type=str, help="The attacker's ip address")
-    parser.add_argument("attacker_port", type=int, help="The attacker's port")
-    parser.add_argument("attacker_fingerprint", type=str, help="The attacker's fingerprint")
     parser.add_argument("-o", "--config-out", type=str, help="A location to output the server's connection file to")
     args = parser.parse_args()
     server_directory = args.directory
@@ -40,5 +37,5 @@ if __name__ == "__main__":
             }, f)
 
     logger = Logger(5, os.path.join(server_directory, "log.txt"))
-    server = EvilServer(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"), logger, args.attacker_ip, args.attacker_port, args.attacker_fingerprint)
+    server = Server(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"), logger)
     server.run()
