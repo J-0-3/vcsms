@@ -12,6 +12,7 @@ from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
+from .exceptions.client import UserNotFoundException, IncorrectMasterKeyException
 from . import keys
 from . import signing
 from . import client_db
@@ -148,13 +149,27 @@ class Client:
 
         Returns:
             list[tuple[bytes, bool]]: The last *count* messages to/from the client in time order
-                (oldest first) in the format (message, outgoing) where message is the raw message
+                (newest first) in the format (message, outgoing) where message is the raw message
                 and outgoing is a bool determining whether the message was sent or received.
         """
         db = self._db_connect()
         messages = db.get_messages_by_nickname(nickname, count)
         db.close()
-        return messages[::-1]
+        return messages
+    
+    def message_count(self, nickname: str) -> int:
+        """Get the number of previous messages to/from the specified nickname.
+
+        Args:
+            nickname (str): The nickname to lookup. 
+
+        Returns:
+            int: The number of messages available. 
+        """
+        db = self._db_connect()
+        count = db.count_messages(nickname)
+        db.close()
+        return count
 
     def send(self, recipient: str, message: bytes):
         """Send a message to a given recipient.
@@ -170,8 +185,7 @@ class Client:
                 db.set_nickname(recipient, recipient)
                 recipient_id = recipient
             else:
-                raise Exception(
-                    "No contact with the specified nickname exists and it does not look like a client ID.")
+                raise UserNotFoundException(recipient)        
         db.insert_message(recipient_id, message, True)
         db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])
@@ -191,12 +205,15 @@ class Client:
 
     def run(self):
         """Connect to the VCSMS server and begin running the client program.
-        This should always be the first method called on the Client class."""
+        This should always be the first method called on the Client class.
+
+        Raises:
+            IncorrectMasterKeyException: The supplied master key is not correct.
+        """
         os.makedirs(os.path.join(self._app_dir, "keys"), exist_ok=True)
         if os.path.exists(os.path.join(self._app_dir, "keytest")):
             if not self._check_master_key():
-                raise ValueError(
-                    "Incorrect master key. Cannot run client program.")
+                raise IncorrectMasterKeyException()
         else:
             self._create_master_key_test()
 

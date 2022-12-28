@@ -95,8 +95,31 @@ class Client_DB:
         """
         nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
         cursor = self._db.cursor()
-        cursor.execute("SELECT messages.content, messages.outgoing, messages.iv FROM messages INNER JOIN nicknames ON messages.id = nicknames.id WHERE nicknames.nickname=? ORDER BY messages.timestamp DESC LIMIT ?", (nickname_encrypted, count))
+        cursor.execute(("SELECT messages.content, messages.outgoing, messages.iv "
+                       "FROM messages "
+                       "INNER JOIN nicknames ON messages.id = nicknames.id "
+                       "WHERE nicknames.nickname=? "
+                       "ORDER BY messages.timestamp "
+                       "DESC "
+                       "LIMIT ?"), (nickname_encrypted, count))
         return [(aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16)), bool(m[1])) for m in cursor.fetchall()]
+
+    def count_messages(self, nickname: str) -> int:
+        """Count the number of messages available from a nickname
+
+        Args:
+            nickname (str): The contact nickname to lookup
+
+        Returns:
+            int: The number of messages available
+        """
+        cursor = self._db.cursor()
+        nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        cursor.execute(("SELECT COUNT (*) "
+                        "FROM messages "
+                        "INNER JOIN nicknames ON messages.id = nicknames.id "
+                        "WHERE nicknames.nickname=?"), (nickname_encrypted, ))
+        return cursor.fetchone()[0]
 
     def insert_message(self, client_id: str, message: bytes, sent: bool):
         """Insert a message into the database.
