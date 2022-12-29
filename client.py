@@ -102,9 +102,12 @@ class Application:
         self._main_panel.clear()
         num_to_display = curses.LINES - 8
         if self._cur_scroll_position + num_to_display > self._message_buffer_oldest:
-            self._message_buffer = self._client.get_messages(self._focused_user, self._cur_scroll_position + num_to_display + 20)
-            self._message_buffer_oldest = self._cur_scroll_position + num_to_display + 20
-        messages_to_show = self._message_buffer[self._cur_scroll_position:self._cur_scroll_position + num_to_display]
+            num_to_load = self._cur_scroll_position + num_to_display + 20
+            self._message_buffer = self._client.get_messages(self._focused_user, num_to_load)
+            self._message_buffer_oldest = num_to_load
+        
+        end = self._cur_scroll_position + num_to_display
+        messages_to_show = self._message_buffer[self._cur_scroll_position:end]
         
         for i, message in enumerate(messages_to_show[::-1]):
             direction = 'TO' if message[1] else 'FROM'
@@ -238,6 +241,7 @@ class Application:
                 self._message_buffer_oldest = 0
                 self._draw_left_panel()
                 self._draw_main_panel()
+                self._draw_bottom_bar()
             case 'h':
                 contacts = self._client.get_contacts()
                 current_contact_index = contacts.index(self._focused_user)
@@ -250,6 +254,7 @@ class Application:
                 self._message_buffer_oldest = 0
                 self._draw_left_panel()
                 self._draw_main_panel()
+                self._draw_bottom_bar()
             case 'j':
                 if self._focused_user:
                     if self._cur_scroll_position > 0:

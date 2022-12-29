@@ -8,6 +8,9 @@ from .cryptographylib import aes256
 
 
 class Client_DB:
+    cached_message_plaintexts = {}
+    cached_nickname_ciphertexts = {}
+    cached_nickname_plaintexts = {}
     """A connection to the client sqlite3 database"""
     def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
         """Constructor for the Client_DB class.
@@ -44,7 +47,13 @@ class Client_DB:
         result = cursor.fetchone()
         if result is None:
             return None
-        return aes256.decrypt_cbc(result[0], self._encryption_key, self._nickname_iv).decode('utf-8')
+        if result[0] in Client_DB.cached_nickname_plaintexts:
+            return Client_DB.cached_nickname_plaintexts[result[0]]
+        else:
+            plaintext = aes256.decrypt_cbc(result[0], self._encryption_key, self._nickname_iv).decode('utf-8')
+            Client_DB.cached_nickname_plaintexts[result[0]] = plaintext
+            Client_DB.cached_nickname_ciphertexts[plaintext] = result[0]
+            return plaintext
 
     def close(self):
         """Close the connection to the database."""
@@ -60,7 +69,12 @@ class Client_DB:
             str | None: The client ID of the associated contact record (None if there is no such contact) 
         """
         cursor = self._db.cursor()
-        nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        if nickname in Client_DB.cached_nickname_ciphertexts:
+            nickname_encrypted = Client_DB.cached_nickname_ciphertexts[nickname]
+        else:
+            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
+            Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
         cursor.execute("SELECT id FROM nicknames WHERE nickname=?", (nickname_encrypted, ))
         result = cursor.fetchone()
         if result is None:
@@ -80,7 +94,15 @@ class Client_DB:
         """
         cursor = self._db.cursor()
         cursor.execute("SELECT content, outgoing, iv FROM messages WHERE id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
-        return [(aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16)), bool(m[1])) for m in cursor.fetchall()]
+        messages = []
+        for m in cursor.fetchall():
+           if m[0] in Client_DB.cached_message_plaintexts:
+               messages.append((Client_DB.cached_message_plaintexts[m[0]], bool(m[1]))) 
+           else:
+               plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
+               Client_DB.cached_message_plaintexts[m[0]] = plaintext
+               messages.append((plaintext, bool(m[1])))
+        return messages
 
     def get_messages_by_nickname(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
         """Get the last *count* messages to/from a specified nickname in descending time order.
@@ -102,7 +124,16 @@ class Client_DB:
                        "ORDER BY messages.timestamp "
                        "DESC "
                        "LIMIT ?"), (nickname_encrypted, count))
-        return [(aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16)), bool(m[1])) for m in cursor.fetchall()]
+
+        messages = []
+        for m in cursor.fetchall():
+           if m[0] in Client_DB.cached_message_plaintexts:
+               messages.append((Client_DB.cached_message_plaintexts[m[0]], bool(m[1]))) 
+           else:
+               plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
+               Client_DB.cached_message_plaintexts[m[0]] = plaintext
+               messages.append((plaintext, bool(m[1])))
+        return messages
 
     def count_messages(self, nickname: str) -> int:
         """Count the number of messages available from a nickname
@@ -114,7 +145,12 @@ class Client_DB:
             int: The number of messages available
         """
         cursor = self._db.cursor()
-        nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        if nickname in Client_DB.cached_nickname_ciphertexts:
+            nickname_encrypted = Client_DB.cached_nickname_ciphertexts[nickname]
+        else:
+            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
+            Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
         cursor.execute(("SELECT COUNT (*) "
                         "FROM messages "
                         "INNER JOIN nicknames ON messages.id = nicknames.id "
@@ -131,6 +167,7 @@ class Client_DB:
         """
         aes_iv = random.randrange(0, 2**128)
         message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
+        Client_DB.cached_message_plaintexts[message_encrypted] = message
         self._db.execute("INSERT INTO messages (id, content, outgoing, timestamp, iv) VALUES (?, ?, ?, strftime('%s','now'), ?)", (client_id, message_encrypted, int(sent), hex(aes_iv)))
         self._db.commit()
 
@@ -142,6 +179,8 @@ class Client_DB:
             nickname (str): The nickname to attach to the client ID. 
         """
         nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
+        Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
         self._db.execute("REPLACE INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
         self._db.commit()
 
@@ -184,5 +223,13 @@ class Client_DB:
         """
         cursor = self._db.cursor()
         cursor.execute("SELECT nickname FROM nicknames")
-        nicknames = [aes256.decrypt_cbc(row[0], self._encryption_key, self._nickname_iv).decode('utf-8') for row in cursor.fetchall()]
+        nicknames = []
+        for nickname in cursor.fetchall():
+            if nickname[0] in Client_DB.cached_nickname_plaintexts:
+                nicknames.append(Client_DB.cached_nickname_plaintexts[nickname[0]])
+            else:
+                plaintext = aes256.decrypt_cbc(nickname[0], self._encryption_key, self._nickname_iv).decode('utf-8')
+                Client_DB.cached_nickname_ciphertexts[plaintext] = nickname[0]
+                Client_DB.cached_nickname_plaintexts[nickname[0]] = plaintext
+                nicknames.append(plaintext)
         return nicknames
