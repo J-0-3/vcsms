@@ -8,18 +8,18 @@ from .cryptographylib import aes256
 
 
 class Client_DB:
-    cached_message_plaintexts = {}
-    cached_nickname_ciphertexts = {}
-    cached_nickname_plaintexts = {}
+    _cached_message_plaintexts = {}
+    _cached_nickname_ciphertexts = {}
+    _cached_nickname_plaintexts = {}
     """A connection to the client sqlite3 database"""
     def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
         """Constructor for the Client_DB class.
 
         Args:
-            path (str): The path to the sqlite3 database file. 
+            path (str): The path to the sqlite3 database file.
             key_file_prefix (str): A string to prepend to all public key files.
-            encryption_key (int): The encryption key to use when storing messages and nicknames. 
-            nickname_iv (int): The initialization vector used when encrypting contacts' nicknames. 
+            encryption_key (int): The encryption key to use when storing messages and nicknames.
+            nickname_iv (int): The initialization vector used when encrypting contacts' nicknames.
         """
         self._db = sqlite3.connect(path)
         self._key_file_prefix = key_file_prefix
@@ -38,7 +38,7 @@ class Client_DB:
 
         Args:
             id (str): The client id to lookup (a 64 char hex string)
-            
+
         Returns:
             str | None: The nickname of the associated contact record (None if there is no such contact)
         """
@@ -47,12 +47,12 @@ class Client_DB:
         result = cursor.fetchone()
         if result is None:
             return None
-        if result[0] in Client_DB.cached_nickname_plaintexts:
-            return Client_DB.cached_nickname_plaintexts[result[0]]
+        if result[0] in self._cached_nickname_plaintexts:
+            return self._cached_nickname_plaintexts[result[0]]
         else:
             plaintext = aes256.decrypt_cbc(result[0], self._encryption_key, self._nickname_iv).decode('utf-8')
-            Client_DB.cached_nickname_plaintexts[result[0]] = plaintext
-            Client_DB.cached_nickname_ciphertexts[plaintext] = result[0]
+            self._cached_nickname_plaintexts[result[0]] = plaintext
+            self._cached_nickname_ciphertexts[plaintext] = result[0]
             return plaintext
 
     def close(self):
@@ -63,18 +63,18 @@ class Client_DB:
         """Get the client ID associated with a given nickname.
 
         Args:
-            nickname (str): The nickname to lookup 
+            nickname (str): The nickname to lookup
 
         Returns:
-            str | None: The client ID of the associated contact record (None if there is no such contact) 
+            str | None: The client ID of the associated contact record (None if there is no such contact)
         """
         cursor = self._db.cursor()
-        if nickname in Client_DB.cached_nickname_ciphertexts:
-            nickname_encrypted = Client_DB.cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_ciphertexts:
+            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
         else:
             nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
-            Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
+            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
+            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
         cursor.execute("SELECT id FROM nicknames WHERE nickname=?", (nickname_encrypted, ))
         result = cursor.fetchone()
         if result is None:
@@ -85,22 +85,22 @@ class Client_DB:
         """Get the last *count* messages to/from a specified client ID in descending time order.
 
         Args:
-            id (str): The client ID to lookup 
-            count (int): The number of messages to return 
+            id (str): The client ID to lookup
+            count (int): The number of messages to return
 
         Returns:
-            list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the 
-                raw message bytes and outgoing is a boolean which is True if the message was sent and False if it was received.  
+            list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the
+                raw message bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
         cursor = self._db.cursor()
         cursor.execute("SELECT content, outgoing, iv FROM messages WHERE id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
         messages = []
         for m in cursor.fetchall():
-           if m[0] in Client_DB.cached_message_plaintexts:
-               messages.append((Client_DB.cached_message_plaintexts[m[0]], bool(m[1]))) 
+           if m[0] in self._cached_message_plaintexts:
+               messages.append((self._cached_message_plaintexts[m[0]], bool(m[1])))
            else:
                plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
-               Client_DB.cached_message_plaintexts[m[0]] = plaintext
+               self._cached_message_plaintexts[m[0]] = plaintext
                messages.append((plaintext, bool(m[1])))
         return messages
 
@@ -109,11 +109,11 @@ class Client_DB:
 
         Args:
             nickname (str): The contact nickname to lookup
-            count (int): The number of messages to return 
+            count (int): The number of messages to return
 
         Returns:
-            list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the 
-                raw messages bytes and outgoing is a boolean which is True if the message was sent and False if it was received.  
+            list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the
+                raw messages bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
         nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
         cursor = self._db.cursor()
@@ -127,11 +127,11 @@ class Client_DB:
 
         messages = []
         for m in cursor.fetchall():
-           if m[0] in Client_DB.cached_message_plaintexts:
-               messages.append((Client_DB.cached_message_plaintexts[m[0]], bool(m[1]))) 
+           if m[0] in self._cached_message_plaintexts:
+               messages.append((self._cached_message_plaintexts[m[0]], bool(m[1])))
            else:
                plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
-               Client_DB.cached_message_plaintexts[m[0]] = plaintext
+               self._cached_message_plaintexts[m[0]] = plaintext
                messages.append((plaintext, bool(m[1])))
         return messages
 
@@ -145,12 +145,12 @@ class Client_DB:
             int: The number of messages available
         """
         cursor = self._db.cursor()
-        if nickname in Client_DB.cached_nickname_ciphertexts:
-            nickname_encrypted = Client_DB.cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_ciphertexts:
+            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
         else:
             nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
-            Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
+            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
+            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
         cursor.execute(("SELECT COUNT (*) "
                         "FROM messages "
                         "INNER JOIN nicknames ON messages.id = nicknames.id "
@@ -162,12 +162,12 @@ class Client_DB:
 
         Args:
             id (str): The client id which the message was sent to/received from.
-            message (bytes): The message contents. 
+            message (bytes): The message contents.
             sent (bool): Whether the message was sent (False if it was received).
         """
         aes_iv = random.randrange(0, 2**128)
         message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
-        Client_DB.cached_message_plaintexts[message_encrypted] = message
+        self._cached_message_plaintexts[message_encrypted] = message
         self._db.execute("INSERT INTO messages (id, content, outgoing, timestamp, iv) VALUES (?, ?, ?, strftime('%s','now'), ?)", (client_id, message_encrypted, int(sent), hex(aes_iv)))
         self._db.commit()
 
@@ -175,12 +175,12 @@ class Client_DB:
         """Set the nickname for a given client id.
 
         Args:
-            id (str): The client ID to attach the nickname to. 
-            nickname (str): The nickname to attach to the client ID. 
+            id (str): The client ID to attach the nickname to.
+            nickname (str): The nickname to attach to the client ID.
         """
         nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-        Client_DB.cached_nickname_ciphertexts[nickname] = nickname_encrypted
-        Client_DB.cached_nickname_plaintexts[nickname_encrypted] = nickname
+        self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
+        self._cached_nickname_plaintexts[nickname_encrypted] = nickname
         self._db.execute("REPLACE INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
         self._db.commit()
 
@@ -188,8 +188,8 @@ class Client_DB:
         """Save the public key for a specified ID.
 
         Args:
-            id (str): The ID who the public key belongs to. 
-            key (tuple[int, int]): The RSA public key in the form (exponent, modulus) 
+            id (str): The ID who the public key belongs to.
+            key (tuple[int, int]): The RSA public key in the form (exponent, modulus)
         """
         keys.write_key(key, self._key_file_prefix + client_id + ".pub")
 
@@ -197,10 +197,10 @@ class Client_DB:
         """Check whether a given client ID is 'known' (i.e. whether a public key exists for it).
 
         Args:
-            id (str): The client ID to lookup 
+            id (str): The client ID to lookup
 
         Returns:
-            bool: Whether or not the client's public key exists. 
+            bool: Whether or not the client's public key exists.
         """
         return os.path.exists(self._key_file_prefix + client_id + ".pub")
 
@@ -211,7 +211,7 @@ class Client_DB:
             id (str): The client ID to lookup
 
         Returns:
-            tuple[int, int]: The RSA public key in the form (exponent, modulus) 
+            tuple[int, int]: The RSA public key in the form (exponent, modulus)
         """
         return keys.load_key(self._key_file_prefix + client_id + ".pub")
 
@@ -219,17 +219,17 @@ class Client_DB:
         """Get a list of all contacts' nicknames.
 
         Returns:
-            list[str]: The nicknames of every known contact. 
+            list[str]: The nicknames of every known contact.
         """
         cursor = self._db.cursor()
         cursor.execute("SELECT nickname FROM nicknames")
         nicknames = []
         for nickname in cursor.fetchall():
-            if nickname[0] in Client_DB.cached_nickname_plaintexts:
-                nicknames.append(Client_DB.cached_nickname_plaintexts[nickname[0]])
+            if nickname[0] in self._cached_nickname_plaintexts:
+                nicknames.append(self._cached_nickname_plaintexts[nickname[0]])
             else:
                 plaintext = aes256.decrypt_cbc(nickname[0], self._encryption_key, self._nickname_iv).decode('utf-8')
-                Client_DB.cached_nickname_ciphertexts[plaintext] = nickname[0]
-                Client_DB.cached_nickname_plaintexts[nickname[0]] = plaintext
+                self._cached_nickname_ciphertexts[plaintext] = nickname[0]
+                self._cached_nickname_plaintexts[nickname[0]] = plaintext
                 nicknames.append(plaintext)
         return nicknames

@@ -156,15 +156,15 @@ class Client:
         messages = db.get_messages_by_nickname(nickname, count)
         db.close()
         return messages
-    
+
     def message_count(self, nickname: str) -> int:
         """Get the number of previous messages to/from the specified nickname.
 
         Args:
-            nickname (str): The nickname to lookup. 
+            nickname (str): The nickname to lookup.
 
         Returns:
-            int: The number of messages available. 
+            int: The number of messages available.
         """
         db = self._db_connect()
         count = db.count_messages(nickname)
@@ -185,7 +185,7 @@ class Client:
                 db.set_nickname(recipient, recipient)
                 recipient_id = recipient
             else:
-                raise UserNotFoundException(recipient)        
+                raise UserNotFoundException(recipient)
         db.insert_message(recipient_id, message, True)
         db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])

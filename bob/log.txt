@@ -1,0 +1,11 @@
+Thu Dec 29 23:01:27 2022|2|b7546a7d31f1415f60fca8a93f9c58ff626081936a95f8293fa1b55a0e0556f2 requested that I resend an authentication packet for message index 2998147656093701703
+Thu Dec 29 23:01:31 2022|2|Message to unknown user b7546a7d31f1415f60fca8a93f9c58ff626081936a95f8293fa1b55a0e0556f2
+Thu Dec 29 23:02:49 2022|3|Trying to close connection to server
+Thu Dec 29 23:02:49 2022|3|Able to close connection
+Thu Dec 29 23:02:49 2022|2|Closed connection to server
+Thu Dec 29 23:15:55 2022|3|Trying to close connection to server
+Thu Dec 29 23:15:55 2022|3|Able to close connection
+Thu Dec 29 23:15:55 2022|2|Closed connection to server
+Thu Dec 29 23:18:54 2022|3|Trying to close connection to server
+Thu Dec 29 23:18:54 2022|3|Able to close connection
+Thu Dec 29 23:18:54 2022|2|Closed connection to server

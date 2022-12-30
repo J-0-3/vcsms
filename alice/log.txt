@@ -1,0 +1,15 @@
+Thu Dec 29 23:01:27 2022|3|Message from unknown user 1cb9c81b04015d8c1548dfbb0cfeddc3fd0480b81e869201af18413d31ac032f
+Thu Dec 29 23:01:32 2022|2|1cb9c81b04015d8c1548dfbb0cfeddc3fd0480b81e869201af18413d31ac032f requested that I resend an authentication packet for message index 2998147656093701703
+Thu Dec 29 23:02:50 2022|3|Trying to close connection to server
+Thu Dec 29 23:02:50 2022|3|Able to close connection
+Thu Dec 29 23:02:50 2022|2|Closed connection to server
+Thu Dec 29 23:15:56 2022|3|Trying to close connection to server
+Thu Dec 29 23:15:56 2022|3|Able to close connection
+Thu Dec 29 23:15:56 2022|2|Closed connection to server
+Thu Dec 29 23:19:25 2022|2|Invalid Diffie Hellman signature from 1cb9c81b04015d8c1548dfbb0cfeddc3fd0480b81e869201af18413d31ac032f
+Thu Dec 29 23:19:37 2022|3|Trying to close connection to server
+Thu Dec 29 23:19:37 2022|3|Able to close connection
+Thu Dec 29 23:19:37 2022|2|Closed connection to server
+Thu Dec 29 23:19:41 2022|3|Trying to close connection to server
+Thu Dec 29 23:19:41 2022|3|Able to close connection
+Thu Dec 29 23:19:41 2022|2|Closed connection to server

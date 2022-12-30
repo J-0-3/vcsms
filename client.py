@@ -32,9 +32,9 @@ class Application:
         self._running = False
         self._message_buffer = []
         self._focused_user = ""
-        contacts = client.get_contacts()
-        if len(contacts) > 0:
-            self._focused_user = contacts[0]
+        self._contacts = client.get_contacts()
+        if len(self._contacts) > 0:
+            self._focused_user = self._contacts[0]
 
     def _draw_top_bar(self):
         """Draw the top bar which displays the user's client ID"""
@@ -82,9 +82,8 @@ class Application:
     def _draw_left_panel(self):
         """Draw the left panel containing the user's contacts."""
         self._left_panel.clear()
-        contacts = self._client.get_contacts()
         self._left_panel.addstr(1, 1, "Contacts: ")
-        for i, contact in enumerate(contacts):
+        for i, contact in enumerate(self._contacts):
             if contact == self._focused_user:
                 self._left_panel.addstr(i + 2, 1, f"[{contact}]")
             else:
@@ -105,10 +104,10 @@ class Application:
             num_to_load = self._cur_scroll_position + num_to_display + 20
             self._message_buffer = self._client.get_messages(self._focused_user, num_to_load)
             self._message_buffer_oldest = num_to_load
-        
+
         end = self._cur_scroll_position + num_to_display
         messages_to_show = self._message_buffer[self._cur_scroll_position:end]
-        
+
         for i, message in enumerate(messages_to_show[::-1]):
             direction = 'TO' if message[1] else 'FROM'
             message_text = message[0].decode('utf-8')
@@ -138,9 +137,13 @@ class Application:
     def _add_new_contact(self):
         """Add a new contact with user supplied nickname and client ID"""
         nickname = self._ask_input("Name").strip()
-        client_id = self._ask_input("ID").strip() 
+        client_id = self._ask_input("ID").strip()
         self._client.add_contact(nickname, client_id)
+        self._contacts = self._client.get_contacts()
         if not self._focused_user:
+            self._focused_user = nickname
+            self._draw_main_panel()
+        if self._focused_user == client_id:
             self._focused_user = nickname
             self._draw_main_panel()
         self._draw_bottom_bar()
@@ -163,6 +166,28 @@ class Application:
             self._draw_bottom_bar()
             self._draw_main_panel()
 
+    def _init_ui(self):
+        self._left_panel = curses.newpad(curses.LINES - 3, 26)
+        self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
+        self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
+        self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
+        self._main_panel = curses.newpad(curses.LINES - 6, curses.COLS - 26)
+        self._stdscr.refresh()
+        self._stdscr.nodelay(True)
+
+    def _cycle_contacts_message_view(self, increment: int):
+        current_contact_index = self._contacts.index(self._focused_user)
+        next_index = (current_contact_index + increment) % len(self._contacts)
+        self._focused_user = self._contacts[next_index]
+        self._new_message[self._focused_user] = False
+        self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
+        self._cur_scroll_position = 0
+        self._message_buffer = []
+        self._message_buffer_oldest = 0
+        self._draw_left_panel()
+        self._draw_main_panel()
+        self._draw_bottom_bar()
+
     @property
     def running(self) -> bool:
         """Get whether the program is currently running
@@ -181,15 +206,9 @@ class Application:
             stdscr (curses.window): The curses screen.
                 Provided by curses.wrapper
         """
-        self._left_panel = curses.newpad(curses.LINES - 3, 26)
-        self._bottom_bar = curses.newwin(3, curses.COLS-26, curses.LINES-3, 26)
-        self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
-        self._top_bar = curses.newwin(3, curses.COLS-26, 0, 26)
-        self._main_panel = curses.newpad(curses.LINES-6, curses.COLS-26)
-        self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
         self._stdscr = stdscr
-        self._stdscr.refresh()
-        self._stdscr.nodelay(True)
+        self._init_ui()
+        self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
         if self._focused_user:
             self._draw_bottom_bar()
         else:
@@ -209,10 +228,12 @@ class Application:
                     self._max_scroll_position += 1
                     self._message_buffer_oldest = 0
                     self._cur_scroll_position = 0
+                if sender not in self._contacts:
+                    self._contacts.append(sender)
                 self._draw_left_panel()
                 self._draw_main_panel()
+                self._draw_bottom_bar()
             self._handle_input()
-
 
     def _handle_input(self):
         """Read one character from the keyboard and perform the appropriate action."""
@@ -230,31 +251,9 @@ class Application:
             case 'n':
                 self._send_message()
             case 'l':
-                contacts = self._client.get_contacts()
-                current_contact_index = contacts.index(self._focused_user)
-                next_index = (current_contact_index + 1) % len(contacts)
-                self._focused_user = contacts[next_index]
-                self._new_message[self._focused_user] = False
-                self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
-                self._cur_scroll_position = 0
-                self._message_buffer = []
-                self._message_buffer_oldest = 0
-                self._draw_left_panel()
-                self._draw_main_panel()
-                self._draw_bottom_bar()
+                self._cycle_contacts_message_view(1)
             case 'h':
-                contacts = self._client.get_contacts()
-                current_contact_index = contacts.index(self._focused_user)
-                prev_index = (current_contact_index - 1) % len(contacts)
-                self._focused_user = contacts[prev_index]
-                self._new_message[self._focused_user] = False
-                self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
-                self._cur_scroll_position = 0
-                self._message_buffer = []
-                self._message_buffer_oldest = 0
-                self._draw_left_panel()
-                self._draw_main_panel()
-                self._draw_bottom_bar()
+                self._cycle_contacts_message_view(-1)
             case 'j':
                 if self._focused_user:
                     if self._cur_scroll_position > 0:
