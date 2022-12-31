@@ -184,6 +184,56 @@ class Client_DB:
         self._db.execute("REPLACE INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
         self._db.commit()
 
+    def change_nickname(self, old_nickname: str, new_nickname: str):
+        """Change the nickname for the client ID associated with the old nickname.
+
+        Does nothing if the old nickname does not exist.
+
+        Args:
+            old_nickname (str): The nickname to change.
+            new_nickname (str): The nickname to change it to.
+
+        Raises:
+            sqlite3.IntegrityError: The new nickname is already in use.
+        """
+        if old_nickname in self._cached_nickname_ciphertexts:
+            encrypted_old_nickname = self._cached_nickname_ciphertexts[old_nickname]
+        else:
+            encrypted_old_nickname = aes256.encrypt_cbc(old_nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_nickname_ciphertexts[old_nickname] = encrypted_old_nickname
+            self._cached_nickname_plaintexts[encrypted_old_nickname] = old_nickname
+
+        if new_nickname in self._cached_nickname_ciphertexts:
+            encrypted_new_nickname = self._cached_nickname_plaintexts[new_nickname]
+        else:
+            encrypted_new_nickname = aes256.encrypt_cbc(new_nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_nickname_ciphertexts[new_nickname] = encrypted_new_nickname
+            self._cached_nickname_plaintexts[encrypted_new_nickname] = new_nickname
+
+        self._db.execute("UPDATE nicknames SET nickname=? WHERE nickname=?", (encrypted_new_nickname, encrypted_old_nickname))
+        self._db.commit()
+
+    def delete_contact_by_nickname(self, nickname: str):
+        """Delete the contact entry and all messages associated with a given nickname.
+        
+        Args:
+            nickname (str): The nickname of the contact to delete
+        """
+        if nickname in self._cached_nickname_ciphertexts:
+            encrypted_nickname = self._cached_nickname_ciphertexts[nickname]
+        else:
+            encrypted_nickname = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_nickname_ciphertexts[nickname] = encrypted_nickname
+            self._cached_nickname_plaintexts[encrypted_nickname] = nickname
+        self._db.execute("DELETE FROM messages WHERE id IN (SELECT id FROM nicknames WHERE nickname=?)", (encrypted_nickname, ))
+        self._db.execute("DELETE FROM nicknames WHERE nickname=?", (encrypted_nickname, ))
+        self._db.commit()
+
+    def delete_contact_by_id(self, client_id: str):
+        self._db.execute("DELETE FROM messages WHERE id=?", (client_id, ))
+        self._db.execute("DELETE FROM nicknames WHERE id=?", (client_id, ))
+        self._db.commit()
+
     def save_key(self, client_id: str, key: tuple[int, int]):
         """Save the public key for a specified ID.
 

@@ -4,6 +4,7 @@ import threading
 import os
 import random
 import re
+import json
 from queue import Queue
 
 from .cryptographylib import dhke, sha256, aes256
@@ -45,6 +46,7 @@ OUTGOING_MESSAGE_TYPES = {
     "ResendAuthPacket": (1, [int], [10]),
     "GetKey": (2, [int, str], [10, 'utf-8']),
     "PublicKeyMismatch": (3, [str, int, int], ['utf-8', 16, 16]),
+    "NoSuchKeyRequest": (1, [int], [10]),
     "UnknownMessageType": (1, [str], ['utf-8']),
     "NotAllowed": (1, [str], ['utf-8'])
 }
@@ -129,6 +131,32 @@ class Client:
             self._logger.log("Invalid ID Format", 1)
             db.close()
 
+    def rename_contact(self, old_nickname: str, new_nickname: str):
+        """Rename the contact with the old nickname to have the new nickname.
+        
+        The new nickname must not match any existing contact nickname
+
+        Args:
+            old_nickname (str): The nickname of the contact to rename.
+            new_nickname (str): The new nickname of the contact.
+
+        Raises:
+            sqlite3.IntegrityError: The new nickname is already in use
+        """
+        db = self._db_connect()
+        db.change_nickname(old_nickname, new_nickname)
+        db.close()
+
+    def delete_contact(self, nickname: str):
+        """Delete the contact with a given nickname.
+
+        Args:
+            nickname (str): The nickname of the contact to delete.
+        """
+        db = self._db_connect()
+        db.delete_contact_by_nickname(nickname)
+        db.close()
+
     def get_contacts(self) -> list[str]:
         """Get a list of all contacts known.
 
@@ -198,7 +226,7 @@ class Client:
             "client_id": recipient_id,
             "dh_private": dh_priv,
             "encryption_key": 0,
-            "data": message
+            "data": message.decode('latin1')  # needs to be JSON serializable
         }
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
@@ -223,32 +251,29 @@ class Client:
                 ciphertext_iv, ciphertext = f.read().split(':')
             ciphertext_iv = int(ciphertext_iv, 16)
             ciphertext = bytes.fromhex(ciphertext)
-            self._nickname_iv = int(aes256.decrypt_cbc(
-                ciphertext, self._encryption_key, ciphertext_iv), 16)
+            self._nickname_iv = int(aes256.decrypt_cbc(ciphertext, self._encryption_key, ciphertext_iv), 16)
         else:
             self._nickname_iv = random.randrange(0, 2**128)
             with open(os.path.join(self._app_dir, "nickname.iv"), 'w+', encoding='utf-8') as f:
                 ciphertext_iv = random.randrange(0, 2**128)
-                ciphertext = aes256.encrypt_cbc(hex(self._nickname_iv)[2:].encode(
-                    'utf-8'), self._encryption_key, ciphertext_iv)
+                ciphertext = aes256.encrypt_cbc(hex(self._nickname_iv)[2:].encode('utf-8'), self._encryption_key, ciphertext_iv)
                 f.write(f"{hex(ciphertext_iv)[2:]}:{ciphertext.hex()}")
 
         db = self._db_connect()
         db.setup()
         db.close()
+        public_key_path = os.path.join(self._app_dir, "client.pub")
+        private_key_path = os.path.join(self._app_dir, "client.priv")
         try:
-            self._pub = keys.load_key(
-                os.path.join(self._app_dir, "client.pub"))
-            self._priv = keys.load_key(
-                os.path.join(self._app_dir, "client.priv"))
+            self._pub = keys.load_key(public_key_path)
+            self._priv = keys.load_key(private_key_path, self._encryption_key)
         except FileNotFoundError:
-            self._pub, self._priv = keys.generate_keys(os.path.join(
-                self._app_dir, "client.pub"), os.path.join(self._app_dir, "client.priv"))
+            self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._encryption_key)
 
-        self._server = ServerConnection(
-            self._ip, self._port, self._fingerprint, self._logger)
+        self._server = ServerConnection(self._ip, self._port, self._fingerprint, self._logger)
         self._server.connect(self._pub, self._priv)
         self._running = True
+        self._load_saved_in_process_messages()
         t_incoming = threading.Thread(target=self._incoming_thread, args=())
         t_incoming.start()
 
@@ -257,6 +282,7 @@ class Client:
         self._server.send(self._message_parser.construct_message("0", "Quit"))
         self._running = False
         self._server.close()
+        self._save_in_process_messages()
 
     def get_id(self) -> str:
         """Get the client ID associated with this client instance.
@@ -271,8 +297,33 @@ class Client:
         while request_index in self._key_requests:
             request_index = random.randrange(1, 2**64)
         self._key_requests[request_index] = client_id
-        self._server.send(self._message_parser.construct_message(
-            "0", "GetKey", request_index, client_id))
+        message = self._message_parser.construct_message("0", "GetKey", request_index, client_id)
+        self._server.send(message)
+
+    def _save_in_process_messages(self):
+        """Save the status of currently in process messages so that they
+        can be sent when next online."""
+        with open(os.path.join(self._app_dir, "in_process.msgs"), 'w+', encoding='utf-8') as f:
+            encrypted_statuses_json = {}
+            for index,message in self._messages.items():
+                message_status_json = json.dumps(message)
+                initialisation_vector = random.randrange(1, 2**128)
+                encrypted_message_status = aes256.encrypt_cbc(message_status_json.encode('utf-8'), self._encryption_key, initialisation_vector)
+                encrypted_statuses_json[index] = f"{initialisation_vector}:{encrypted_message_status.hex()}"
+            json.dump(encrypted_statuses_json, f)
+
+    def _load_saved_in_process_messages(self):
+        """Load any saved message states to continue sending/receiving them."""
+        if os.path.exists(os.path.join(self._app_dir, "in_process.msgs")):
+            with open(os.path.join(self._app_dir, "in_process.msgs"), 'r', encoding='utf-8') as f:
+                encrypted_statuses_json = json.load(f)
+                for index,encrypted_record in encrypted_statuses_json.items():
+                    initialisation_vector, ciphertext_hex = encrypted_record.split(':')
+                    initialisation_vector = int(initialisation_vector)
+                    ciphertext = bytes.fromhex(ciphertext_hex)
+                    message_status = aes256.decrypt_cbc(ciphertext, self._encryption_key, initialisation_vector)
+                    message_status_json = json.loads(message_status.decode('utf-8'))
+                    self._messages[int(index)] = message_status_json
 
     def _create_master_key_test(self):
         """Create a file containing some random plaintext and ciphertext
@@ -344,7 +395,7 @@ class Client:
             None | tuple[str, tuple]: None if successful
                 PublicKeyMismatch: The supplied key's fingerprint does not match the client ID.
                 NotAllowed: The message did not originate from the server.
-                NoSuchIndex: The request index does not match any existing key request
+                NoSuchKeyRequest: The request index does not match any existing key request
         """
         request_index, exponent, modulus = values
 
@@ -358,7 +409,7 @@ class Client:
                     db.close()
                     return None
                 return "PublicKeyMismatch", (client_id, exponent, modulus)
-            return "NoSuchIndex", (request_index, )
+            return "NoSuchKeyRequest", (request_index, )
         return "NotAllowed", ("KeyFound", )
 
     def _handler_key_not_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
@@ -369,7 +420,7 @@ class Client:
 
         Returns:
             None | tuple[str, tuple]: None if successful.
-                NoSuchIndex: The request index does not match any existing key request.
+                NoSuchKeyRequest: The request index does not match any existing key request.
                 NotAllowed: The message did not originate from the server.
         """
         if sender == '0':
@@ -380,7 +431,7 @@ class Client:
                     f"Server could not locate key for {client_id}", 2)
                 self._key_requests.pop(req_index)
                 return None
-            return "NoSuchIndex", (req_index, )
+            return "NoSuchKeyRequest", (req_index, )
         return "NotAllowed", ("KeyNotFound", )
 
     def _handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -431,7 +482,7 @@ class Client:
             "client_id": sender,
             "dh_private": dh_priv,
             "encryption_key": encryption_key,
-            "data": b''}
+            "data": ''}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -475,7 +526,7 @@ class Client:
             shared_secret = dhke.calculate_shared_key(
                 dh_priv, sender_dh_pub, self._dhke_group)
             encryption_key = sha256.hash(i_to_b(shared_secret))
-            plaintext = self._messages[message_index]["data"]
+            plaintext = self._messages[message_index]["data"].encode('latin')
             aes_iv = random.randrange(2, 2 ** 128)
             ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
             self._messages.pop(message_index)

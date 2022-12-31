@@ -20,7 +20,7 @@ class ServerConnection:
         Args:
             ip (str): The IP address of the server to connect to.
             port (int): The port on the server to connect to.
-            fp (str): The server's public key fingerprint. 
+            fp (str): The server's public key fingerprint.
             logger (Logger): An instance of the vcsms.logger.Logger class to use for logging events/errors.
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -51,12 +51,12 @@ class ServerConnection:
 
         Args:
             pub_key (tuple[int, int]): The client public key to send the server.
-            priv_key (tuple[int, int]): The client private key to use when signing diffie hellman keys. 
+            priv_key (tuple[int, int]): The client private key to use when signing diffie hellman keys.
             dhke_group (tuple[int, int], optional): The diffie hellman group to use in the form (generator, modulus). Defaults to dhke.group16_4096.
 
         Raises:
-            MalformedPacketException: The server sent a message of an invalid form. 
-            PublicKeyIdMismatchException: The server provided a public key that doesn't match the specified fingerprint. 
+            MalformedPacketException: The server sent a message of an invalid form.
+            PublicKeyIdMismatchException: The server provided a public key that doesn't match the specified fingerprint.
             SignatureVerifyFailureException: The server provided a badly signed diffie hellman public key.
         """
         pub_exp = hex(pub_key[0])[2:].encode()
@@ -100,7 +100,7 @@ class ServerConnection:
         """Begin a connection to the server.
 
         Args:
-            pub_key (tuple[int, int]): The client public key to send to the server. 
+            pub_key (tuple[int, int]): The client public key to send to the server.
             priv_key (tuple[int, int]): The client private key to use when signing data.
         """
         self._socket.connect(self._ip, self._port)
@@ -114,7 +114,7 @@ class ServerConnection:
 
     def _in_thread(self):
         """A function to be run by a thread which receives, parses and decrypts messages from the server."""
-        while self._connected:        
+        while self._connected:
             if self._socket.new():
                 data = self._socket.recv()
                 try:
@@ -165,10 +165,10 @@ class ServerConnection:
         self._out_queue.put(data)
 
     def read(self) -> bytes:
-        """Block until a new piece of data is available from the connection and then return it. 
+        """Block until a new piece of data is available from the connection and then return it.
 
         Returns:
-            bytes: The data received from the server. 
+            bytes: The data received from the server.
         """
         return self._in_queue.get()
 

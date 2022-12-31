@@ -15,7 +15,7 @@ from .exceptions.message_parser import MessageParseException
 INCOMING_MESSAGE_TYPES = {
     "GetKey": (2, [int, str], [10, 'utf-8']),
     "Quit": (0, [], []),
-    "NoSuchIndex": (1, [int], [10]),
+    "NoSuchKeyRequest": (1, [int], [10])
 }
 
 OUTGOING_MESSAGE_TYPES = {
@@ -30,12 +30,12 @@ class Server:
         """Initialise a VCSMS server.
 
         Args:
-            addr (str): The IP address of the network interface to bind to. 
+            addr (str): The IP address of the network interface to bind to.
             port (int): The TCP port to bind to.
-            keypair (tuple[tuple[int, int], tuple[int, int]]): The public and private RSA keys for the server to use in the form (exponent, modulus). 
-            db_path (str): The file path at which the sqlite3 database is stored. 
-            pubkey_directory (str): The directory to store all client public keys under. 
-            logger (Logger): An instance of vcsms.logger.Logger to use for logging errors/events that occur in the server. 
+            keypair (tuple[tuple[int, int], tuple[int, int]]): The public and private RSA keys for the server to use in the form (exponent, modulus).
+            db_path (str): The file path at which the sqlite3 database is stored.
+            pubkey_directory (str): The directory to store all client public keys under.
+            logger (Logger): An instance of vcsms.logger.Logger to use for logging errors/events that occur in the server.
         """
         self._addr = addr
         self._port = port
@@ -77,8 +77,8 @@ class Server:
         """Send a message to a specified client ID.
 
         Args:
-            client (str): The client ID to send the message to 
-            message (bytes): The raw message bytes to send. 
+            client (str): The client ID to send the message to
+            message (bytes): The raw message bytes to send.
         """
         if client not in self._client_outboxes:
             self._logger.log("Message to offline/unknown user {client}", 3)
@@ -206,8 +206,8 @@ class Server:
         """Handler function for the GetKey message type.
 
         Args:
-            sender (str): The client ID which sent the message. 
-            values (list): The parameters of the message (target ID (str)) 
+            sender (str): The client ID which sent the message.
+            values (list): The parameters of the message (target ID (str))
 
         Returns:
             tuple[str, tuple]: KeyFound if successful.
@@ -231,7 +231,7 @@ class Server:
         """Handler function for the Quit message type.
 
         Args:
-            sender (str): The client ID which sent the message. 
+            sender (str): The client ID which sent the message.
         """
         self._logger.log(f"User {sender} requested a logout", 1)
         self._sockets[sender].close()
@@ -240,7 +240,7 @@ class Server:
         """Get a connection to the server database.
 
         Returns:
-            Server_DB: An server database connection object 
+            Server_DB: An server database connection object
         """
         db = Server_DB(self._db_path, self._pubkey_path)
         return db

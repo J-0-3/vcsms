@@ -69,7 +69,7 @@ def split_bytes(n: int, byte_count: int = 4) -> list:
     Args:
         i (int): The word to split
         byte_count (int, optional): The amount of bytes required to store the word. Defaults to 4.
-        Set to 0 to use the lowest amount of bytes possible to hold the word. 
+        Set to 0 to use the lowest amount of bytes possible to hold the word.
 
     Raises:
         Exception: If the amount of bytes specified is too small to hold the word.
@@ -154,8 +154,8 @@ def gf_mod_bytes(b: int, mod: int) -> int:
 
 def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
     """Calculate the product of two galois field polynomials represented as bytes
-    (eg 171 = 0b10101011 = x^7 + x^5 + x^3 + x^1 + 1). This is defined as the 
-    standard polynomial multiplication of the two polynomials modulus another 
+    (eg 171 = 0b10101011 = x^7 + x^5 + x^3 + x^1 + 1). This is defined as the
+    standard polynomial multiplication of the two polynomials modulus another
     polynomial in the field.
 
     Args:
@@ -183,7 +183,7 @@ for i in range(256):
 
 
 def transpose_matrix(m: list) -> list:
-    """Transpose a column/row major 4x4 matrix to row/column major. 
+    """Transpose a column/row major 4x4 matrix to row/column major.
 
     Args:
         m (list): 2D list containing the matrix to be transposed
@@ -192,7 +192,7 @@ def transpose_matrix(m: list) -> list:
         list: 2D list containing the transposed matrix
     """
 
-    return [[m[0][0], m[1][0], m[2][0], m[3][0]], 
+    return [[m[0][0], m[1][0], m[2][0], m[3][0]],
             [m[0][1], m[1][1], m[2][1], m[3][1]],
             [m[0][2], m[1][2], m[2][2], m[3][2]],
             [m[0][3], m[1][3], m[2][3], m[3][3]]]
@@ -240,7 +240,7 @@ def sub_bytes(state: list, inverse: bool = False) -> list:
 
 
 def shift_rows(state: list, inverse: bool = False) -> list:
-    """Cyclically shift (rotate) each row in the state left (right if inverse) 
+    """Cyclically shift (rotate) each row in the state left (right if inverse)
     by an increment of 1 each row.
     [a1 a2 a3 a4] -> [a1 a2 a3 a4]
     [b1 b2 b3 b4]    [b4 b1 b2 b3]
@@ -265,15 +265,15 @@ def shift_rows(state: list, inverse: bool = False) -> list:
 
 def mix_columns(state: list, inverse: bool = False) -> list:
     """Multiply the state matrix by another 4x4 matrix formed from a galois field polynomial repeated
-    for each row of the matrix with a cyclic right shift of the row index + 1. To encipher the state the 
-    polynomial used is 0xb 0xd 0x9 0xe and to decipher it is 0x3 0x1 0x1 0x2. 
+    for each row of the matrix with a cyclic right shift of the row index + 1. To encipher the state the
+    polynomial used is 0xb 0xd 0x9 0xe and to decipher it is 0x3 0x1 0x1 0x2.
 
     Args:
         state (list): The current 4x4 state matrix
         inverse (bool, optional): Whether to invert the operation. Defaults to False.
 
     Returns:
-        list: The resultant state matrix. 
+        list: The resultant state matrix.
     """
 
     columns = transpose_matrix(state)
@@ -312,11 +312,11 @@ def add_round_key(state: list, round_key: list) -> list:
 
 
 def int_to_word_array(x: int, words: int = 4) -> list:
-    """Convert an integer of any length into an array of 4 byte (32 bit) words. 
+    """Convert an integer of any length into an array of 4 byte (32 bit) words.
 
     Args:
         x (int): The integer to split.
-        words (int, optional): The amount of words to hold the integer in. 
+        words (int, optional): The amount of words to hold the integer in.
         Defaults to 0 (minimum amount of words required).
 
     Raises:
@@ -431,7 +431,7 @@ def rotate_word(word: int) -> int:
 
 
 def expand_key(key: int) -> list:
-    """Perform an aes key expansion on a given 256 bit key to produce 
+    """Perform an aes key expansion on a given 256 bit key to produce
     60 words to be used as round keys in the AES cipher
 
     Args:
@@ -536,11 +536,11 @@ def decrypt_block(key_schedule: list, block: int) -> int:
 
 
 def encrypt_ecb(data: bytes, key: int) -> bytes:
-    """Encrypt a bytestring using AES in Electronic Code Book mode. 
-    This means that the data is split into blocks and each block is 
-    encrypted independently using the same key. 
+    """Encrypt a bytestring using AES in Electronic Code Book mode.
+    This means that the data is split into blocks and each block is
+    encrypted independently using the same key.
     This is *insecure* as if data is repeated throughout the plaintext then there
-    will be repeated block within the ciphertext allowing for cryptanalysis.  
+    will be repeated blocks within the ciphertext allowing for cryptanalysis.
 
     Args:
         data (bytes): The plaintext bytestring to encrypt
@@ -586,11 +586,11 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
 
 def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
-    This means that the output of the encryption of each plaintext block 
-    is XORed with the next plaintext block before it is encrypted which 
+    This means that the output of the encryption of each plaintext block
+    is XORed with the next plaintext block before it is encrypted which
     creates entropy within the ciphertext and prevents ciphertext analysis.
-    The initialisation vector is the value which is XORed with the first block to 
-    prevent comparing the first blocks of two matching messages. 
+    The initialisation vector is the value which is XORed with the first block to
+    prevent comparing the first blocks of two matching messages.
 
     Args:
         data (bytes): The plaintext bytestring to encrypt
@@ -607,12 +607,12 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     prev_output = initialisation_vector
     for block in message_blocks:
         xored_block = block ^ prev_output  # xor with previous block output
-        ciphertext_block = encrypt_block(key_schedule, xored_block) 
+        ciphertext_block = encrypt_block(key_schedule, xored_block)
         prev_output = ciphertext_block
         ciphertext_blocks.append(ciphertext_block)
 
-    # combine blocks by repeated left shift and OR 
-    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant (big endian)  
+    # combine blocks by repeated left shift and OR
+    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant (big endian)
     ciphertext = 0
     for block in ciphertext_blocks:
         ciphertext |= (block << shift)
@@ -627,7 +627,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     Args:
         ciphertext (bytes): The encrypted ciphertext bytestring
         key (int): The 256 bit encryption key
-        initialisation_vector (int): The 128 bit initialisation vector used when the data was encrypted. 
+        initialisation_vector (int): The 128 bit initialisation vector used when the data was encrypted.
 
     Returns:
         bytes: The decrypted plaintext bytestring
@@ -653,5 +653,6 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
 
     plaintext = i_to_b(message)
     if plaintext[:3] == b'AES':
-        return plaintext[3:] 
+        return plaintext[3:]
     raise DecryptionFailureException(key)
+

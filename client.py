@@ -31,10 +31,36 @@ class Application:
         self._message_buffer_oldest = 0
         self._running = False
         self._message_buffer = []
-        self._focused_user = ""
+        self.__focused_user = ""
         self._contacts = client.get_contacts()
         if len(self._contacts) > 0:
-            self._focused_user = self._contacts[0]
+            self.__focused_user = self._contacts[0]
+    
+    @property
+    def _focused_user(self) -> str:
+        """Get the name of the currently focused user.
+
+        Setting this automatically resets the scroll position and
+        redraws the left panel, main panel, and bottom bar if required.
+        """
+        return self.__focused_user
+
+    @_focused_user.setter
+    def _focused_user(self, user: str):
+        bottom_bar_redraw = bool(user) != bool(self.__focused_user)
+        self.__focused_user = user
+        if user:
+            self._new_message[user] = False
+            self._max_scroll_position = self._client.message_count(user) - (curses.LINES - 8)
+        else:
+            self._max_scroll_position = 0
+        self._cur_scroll_position = 0
+        self._message_buffer = []
+        self._message_buffer_oldest = 0
+        self._draw_left_panel()
+        self._draw_main_panel()
+        if bottom_bar_redraw:
+            self._draw_bottom_bar()
 
     def _draw_top_bar(self):
         """Draw the top bar which displays the user's client ID"""
@@ -56,7 +82,7 @@ class Application:
         else:
             instructions = ""
             if self._focused_user:
-                instructions += "(n)ew message "
+                instructions += "(n)ew message (r)ename (d)elete "
             instructions += "(a)dd contact (q)uit "
             if self._cur_scroll_position > 0:
                 instructions += "j \u2193 "
@@ -132,22 +158,19 @@ class Application:
         textbox = curses.textpad.Textbox(textbox_container)
         self._stdscr.refresh()
         textbox.edit()
-        return textbox.gather()
+        self._draw_bottom_bar()
+        return textbox.gather().strip()
 
     def _add_new_contact(self):
         """Add a new contact with user supplied nickname and client ID"""
-        nickname = self._ask_input("Name").strip()
-        client_id = self._ask_input("ID").strip()
+        nickname = self._ask_input("Name")
+        client_id = self._ask_input("ID")
         self._client.add_contact(nickname, client_id)
         self._contacts = self._client.get_contacts()
-        if not self._focused_user:
+        if self._focused_user == client_id or not self._focused_user:
             self._focused_user = nickname
-            self._draw_main_panel()
-        if self._focused_user == client_id:
-            self._focused_user = nickname
-            self._draw_main_panel()
-        self._draw_bottom_bar()
-        self._draw_left_panel()
+        else:
+            self._draw_left_panel()  # setting focused user does this automatically but needs to be done.
 
     def _send_message(self):
         """Prompt the user to send a message to the currently focused user.
@@ -156,15 +179,36 @@ class Application:
         currently focused user.
         """
         if self._focused_user:
-            message = self._ask_input("Message").strip()
+            message = self._ask_input("Message")
             if message:
                 self._client.send(self._focused_user, message.encode())
                 self._max_scroll_position += 1
                 self._message_buffer_oldest = 0
                 self._cur_scroll_position = 0
-            self._draw_left_panel()
-            self._draw_bottom_bar()
             self._draw_main_panel()
+
+    def _rename_contact(self):
+        """Prompt the user to enter a new name for the currently focused user.
+
+        Cancelled if the user does not enter a name.
+        """
+        if self._focused_user:
+            new_name = self._ask_input("New Name")
+            if new_name:
+                self._client.rename_contact(self._focused_user, new_name)
+                self._contacts = self._client.get_contacts()
+                self._focused_user = new_name
+
+    def _delete_contact(self):
+        if self._focused_user:
+            confirm = self._ask_input(f"Delete {self._focused_user}? (y/N)")
+            if confirm.lower() in {'y', 'yes'}:
+                self._client.delete_contact(self._focused_user)
+                self._contacts = self._client.get_contacts()
+                if len(self._contacts) > 0:
+                    self._focused_user = self._contacts[0]
+                else:
+                    self._focused_user = ""
 
     def _init_ui(self):
         self._left_panel = curses.newpad(curses.LINES - 3, 26)
@@ -176,17 +220,10 @@ class Application:
         self._stdscr.nodelay(True)
 
     def _cycle_contacts_message_view(self, increment: int):
-        current_contact_index = self._contacts.index(self._focused_user)
-        next_index = (current_contact_index + increment) % len(self._contacts)
-        self._focused_user = self._contacts[next_index]
-        self._new_message[self._focused_user] = False
-        self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
-        self._cur_scroll_position = 0
-        self._message_buffer = []
-        self._message_buffer_oldest = 0
-        self._draw_left_panel()
-        self._draw_main_panel()
-        self._draw_bottom_bar()
+        if self._focused_user:
+            current_contact_index = self._contacts.index(self._focused_user)
+            next_index = (current_contact_index + increment) % len(self._contacts)
+            self._focused_user = self._contacts[next_index]
 
     @property
     def running(self) -> bool:
@@ -207,6 +244,9 @@ class Application:
                 Provided by curses.wrapper
         """
         self._stdscr = stdscr
+        if curses.COLS < 102 or curses.LINES < 9:
+            self._client.quit()
+            raise Exception("Window too small. Resize your terminal.")
         self._init_ui()
         self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
         if self._focused_user:
@@ -250,6 +290,10 @@ class Application:
                 self._add_new_contact()
             case 'n':
                 self._send_message()
+            case 'r':
+                self._rename_contact()
+            case 'd':
+                self._delete_contact()
             case 'l':
                 self._cycle_contacts_message_view(1)
             case 'h':
@@ -286,5 +330,6 @@ if __name__ == "__main__":
         vcsms_client.run()
     except IncorrectMasterKeyException:
         print("Master password incorrect. Please try again.")
+        quit()
     application = Application(vcsms_client)
     curses.wrapper(application.run)

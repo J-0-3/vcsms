@@ -6,6 +6,8 @@ import json
 from vcsms.server import Server
 from vcsms.logger import Logger
 from vcsms import keys
+from vcsms.cryptographylib import sha256
+from vcsms.cryptographylib.exceptions import DecryptionFailureException
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -14,11 +16,19 @@ if __name__ == "__main__":
     args = parser.parse_args()
     server_directory = args.directory
     os.makedirs(os.path.join(server_directory, "keys"), exist_ok=True)
+    private_key_password = input("Enter private key encryption password: ").encode('utf-8')
+    private_key_encryption_key = sha256.hash(private_key_password)
+    public_key_path = os.path.join(server_directory, "server.pub")
+    private_key_path = os.path.join(server_directory, "server.priv")
     try:
-        pub = keys.load_key(os.path.join(server_directory, "server.pub"))
-        priv = keys.load_key(os.path.join(server_directory, "server.priv"))
+        pub = keys.load_key(public_key_path)
+        priv = keys.load_key(private_key_path, private_key_encryption_key)
     except FileNotFoundError:
-        pub, priv = keys.generate_keys(os.path.join(server_directory, "server.pub"), os.path.join(server_directory, "server.priv"))
+        pub, priv = keys.generate_keys(public_key_path, private_key_path, private_key_encryption_key)
+    except DecryptionFailureException:
+        print("Private key password incorrect. Try again.")
+        quit()
+
 
     if os.path.exists(os.path.join(server_directory, "server.conf")):
         with open(os.path.join(server_directory, "server.conf"), encoding='utf-8') as f:
