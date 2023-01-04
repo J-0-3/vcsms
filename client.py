@@ -138,7 +138,7 @@ class Application:
             direction = 'TO' if message[1] else 'FROM'
             message_text = message[0].decode('utf-8')
             self._main_panel.addstr(i, 1, f"{direction} {self._focused_user}: {message_text}")
-        self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS)
+        self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS-1)
 
     def _ask_input(self, prompt: str) -> str:
         """Ask for input given a specific prompt.
