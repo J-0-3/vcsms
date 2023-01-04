@@ -15,11 +15,16 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--config-out", type=str, help="A location to output the server's connection file to")
     args = parser.parse_args()
     server_directory = args.directory
-    os.makedirs(os.path.join(server_directory, "keys"), exist_ok=True)
-    private_key_password = input("Enter private key encryption password: ").encode('utf-8')
-    private_key_encryption_key = sha256.hash(private_key_password)
+    key_directory = os.path.join(server_directory, "keys")
+    os.makedirs(key_directory, exist_ok=True)
     public_key_path = os.path.join(server_directory, "server.pub")
     private_key_path = os.path.join(server_directory, "server.priv")
+    config_path = os.path.join(server_directory, "config_path")
+    log_path = os.path.join(server_directory, "log.txt")
+    database_path = os.path.join(server_directory, "server.db")
+
+    private_key_password = input("Enter private key encryption password: ").encode('utf-8')
+    private_key_encryption_key = sha256.hash(private_key_password)
     try:
         pub = keys.load_key(public_key_path)
         priv = keys.load_key(private_key_path, private_key_encryption_key)
@@ -29,9 +34,8 @@ if __name__ == "__main__":
         print("Private key password incorrect. Try again.")
         quit()
 
-
-    if os.path.exists(os.path.join(server_directory, "server.conf")):
-        with open(os.path.join(server_directory, "server.conf"), encoding='utf-8') as f:
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
     else:
         config = {
@@ -46,6 +50,6 @@ if __name__ == "__main__":
                 "fingerprint": keys.fingerprint(pub)
             }, f)
 
-    logger = Logger(5, os.path.join(server_directory, "log.txt"))
-    server = Server(config["ip"], config["port"], (pub, priv), os.path.join(server_directory, "server.db"), os.path.join(server_directory, "keys"), logger)
+    logger = Logger(5, log_path)
+    server = Server(config["ip"], config["port"], (pub, priv), database_path, key_directory, logger)
     server.run()

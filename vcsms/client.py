@@ -4,10 +4,12 @@ import threading
 import os
 import random
 import re
+import time
 import json
 from queue import Queue
+from typing import Callable
 
-from .cryptographylib import dhke, sha256, aes256
+from .cryptographylib import dhke, sha256, aes256, rsa
 from .cryptographylib.utils import i_to_b
 from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
@@ -21,34 +23,67 @@ from .logger import Logger
 
 INCOMING_MESSAGE_TYPES = {
     # type       argc arg types         additional type info (encoding, base, etc)
-    "NewMessage": (3, [int, int, bytes], [10, 16]),
-    "MessageAccept": (3, [int, int, bytes], [10, 16]),
-    "MessageData": (3, [int, int, bytes], [10, 16]),
+    # message index, diffie hellman pub, diffie hellman sig
+    "NewMessage": (3, [int, int, bytes], [10, 16, None]),
+    # message index, diffie hellman pub, diffie hellman sig
+    "MessageAccept": (3, [int, int, bytes], [10, 16, None]),
+    # message index, initialisation vector, message data
+    "MessageData": (3, [int, int, bytes], [10, 16, None]),
+    # request index, exponent, modulus (server only)
     "KeyFound": (3, [int, int, int], [10, 16, 16]),
+    # request index (server only)
     "KeyNotFound": (1, [int], [10]),
+    # message index
     "IndexInUse": (1, [int], [10]),
-    "DecryptionFailure": (1, [int], [10]),
+    "MessageDecryptionFailure": (1, [int], [10]),
     "InvalidSignature": (1, [int], [10]),
     "NoSuchIndex": (1, [int], [10]),
     "ResendAuthPacket": (1, [int], [10]),
+    # message type
     "UnknownMessageType": (1, [str], ['utf-8']),
-    "NotAllowed": (1, [str], ['utf-8'])
+    "NotAllowed": (1, [str], ['utf-8']),
+    # encrypted group name, signature, group id, members
+    "CreateGroup": (4, [bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
+    # group id, new group id, signature
+    "ChangeGroupID": (3, [int, int, bytes], [10, 10, None]),
+    # group id, signature
+    "GroupIDInUse": (2, [int, bytes], [10, None]),
+    # group id
+    "NoSuchGroup": (1, [int], [10]),
+    "GroupNameDecryptionFailure": (1, [int], [10])
 }
 
 OUTGOING_MESSAGE_TYPES = {
-    "NewMessage": (3, [int, int, bytes], [10, 16]),
-    "MessageAccept": (3, [int, int, bytes], [10, 16]),
-    "MessageData": (3, [int, int, bytes], [10, 16]),
+    # message index, diffie hellman pub, diffie hellman sig
+    "NewMessage": (3, [int, int, bytes], [10, 16, None]),
+    # message index, diffie hellman pub, diffie hellman sig
+    "MessageAccept": (3, [int, int, bytes], [10, 16, None]),
+    # message index, initialisation vector, message data
+    "MessageData": (3, [int, int, bytes], [10, 16, None]),
+    # message index
     "IndexInUse": (1, [int], [10]),
-    "DecryptionFailure": (1, [int], [10]),
+    "MessageDecryptionFailure": (1, [int], [10]),
     "InvalidSignature": (1, [int], [10]),
     "NoSuchIndex": (1, [int], [10]),
     "ResendAuthPacket": (1, [int], [10]),
+    # request index, client id (server only)
     "GetKey": (2, [int, str], [10, 'utf-8']),
+    # client id, exponent, modulus (server only)
     "PublicKeyMismatch": (3, [str, int, int], ['utf-8', 16, 16]),
+    # request index (server only)
     "NoSuchKeyRequest": (1, [int], [10]),
+    # message type
     "UnknownMessageType": (1, [str], ['utf-8']),
-    "NotAllowed": (1, [str], ['utf-8'])
+    "NotAllowed": (1, [str], ['utf-8']),
+    # encrypted group name, signature, group id, members
+    "CreateGroup": (4, [bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
+    # group id, new id, signature
+    "ChangeGroupID": (3, [int, int, bytes], [10, 10, None]),
+    # group id, signature
+    "GroupIDInUse": (2, [int, bytes], [10, None]),
+    # group id
+    "NoSuchGroup": (1, [int], [10]),
+    "GroupNameDecryptionFailure": (1, [int], 10)
 }
 
 
@@ -94,6 +129,9 @@ class Client:
             "MessageData": self._handler_message_data,
             "IndexInUse": self._handler_index_in_use,
             "ResendAuthPacket": self._handler_resend_auth_packet
+            "CreateGroup": self._handler_create_group,
+            "ChangeGroupID": self._handle_change_group_id,
+            "GroupIDInUse": self._handler_group_id_in_use
         }
         self._message_parser = MessageParser(
             INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
@@ -133,7 +171,7 @@ class Client:
 
     def rename_contact(self, old_nickname: str, new_nickname: str):
         """Rename the contact with the old nickname to have the new nickname.
-        
+
         The new nickname must not match any existing contact nickname
 
         Args:
@@ -168,11 +206,11 @@ class Client:
         db.close()
         return contacts
 
-    def get_messages(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
-        """Get the last *count* messages to/from the specified nickname.
+    def get_messages(self, name: str, count: int) -> list[tuple[bytes, bool]]:
+        """Get the last *count* messages to/from the specified user/group.
 
         Args:
-            nickname (str): The nickname to lookup.
+            nickname (str): The nickname/group name to lookup.
             count (int): The (maximum) number of messages to/from the specified nickname to return.
 
         Returns:
@@ -181,7 +219,11 @@ class Client:
                 and outgoing is a bool determining whether the message was sent or received.
         """
         db = self._db_connect()
-        messages = db.get_messages_by_nickname(nickname, count)
+        messages = db.get_messages_by_nickname(name, count)
+        if messages:
+            db.close()
+            return messages
+        messages = db.get_group_messages(name, count)
         db.close()
         return messages
 
@@ -226,11 +268,85 @@ class Client:
             "client_id": recipient_id,
             "dh_private": dh_priv,
             "encryption_key": 0,
-            "data": message.decode('latin1')  # needs to be JSON serializable
+            "data": message.decode('latin1'),  # needs to be JSON serializable
+            "group": ''
         }
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
         self._server.send(message)
+
+    def group_send(self, group: str, message: bytes):
+        """Send a message to all recipients in the sepecified group.
+
+        Args:
+            group (str): The name of the group to sent the messages to.
+            message (bytes): The message to send.
+        """
+        db = self._db_connect()
+        recipients = db.get_members(group)
+
+        for recipient in recipients:
+            db.insert_message(recipient, message, True)
+            db.close()
+            dh_priv = random.randrange(1, self._dhke_group[1])
+            index = random.randrange(1, 2**64)
+            while index in self._messages:
+                index = random.randrange(1, 2**64)
+            dh_pub, dh_sig = signing.gen_signed_diffie_hellman(dh_priv, self._priv, self._dhke_group, index)
+            self._messages[index] = {
+                "client_id": recipient,
+                "dh_private": dh_priv,
+                "encryption_key": 0,
+                "data": message.decode('latin1'),
+                "group": group
+            }
+            message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
+            self._server.send(message)
+
+    def create_group(self, name: str, *members: str):
+        """Create a group of users which can be used to send group messages.
+
+        Args:
+            name (str): The name of the group.
+            *members (str): The ids/nicknames of the members to add to the group.
+        """
+        member_ids = []
+        db = self._db_connect()
+        for member in member_ids:
+            member_id = db.get_id(member)
+            if member_id is None:
+                if re.fullmatch("^[a-fA-F0-9]{64}$", member_id):
+                    member_id = member
+                else:
+                    raise UserNotFoundException(member)
+            member_ids.append(member_id)
+
+        group_id = random.randrange(1, 2**64)
+        while db.get_group_name(group_id):
+            group_id = random.randrange(1, 2**64)
+
+        db.create_group(name, group_id, self.get_id(), members)
+
+        def invite_user(user: str):
+            key = db.get_key(user)
+            name_encryption_key = random.randrange(1, 2**256)
+            name_encryption_iv = random.randrange(1, 2**128)
+
+            signature_data = (name + hex(group_id) + ''.join(member_ids) + user).encode('utf-8')
+            signature = signing.sign(signature_data, self._priv)
+            encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
+            invite_message = self._message_parser.construct_message(
+                recipient, "CreateGroup",
+                encrypted_group_name, signature, group_id, member_ids)
+            self._server.send(invite_message)
+
+        for member_id in member_ids:
+            if db.user_known(member_id):
+                invite_user(member_id)
+            else:
+                self._request_key(member_id)
+                await_key_thread = threading.Thread(target=self._await_key, args=(member_id, invite_user, member_id))
+                await_key_thread.start()
 
     def run(self):
         """Connect to the VCSMS server and begin running the client program.
@@ -300,6 +416,22 @@ class Client:
         message = self._message_parser.construct_message("0", "GetKey", request_index, client_id)
         self._server.send(message)
 
+    def _await_key(self, client_id: str, callback: Callable, *args):
+        """Wait until the public key for a given client id is known and then execute
+        a callback function. Useful if the public key is required for some operation
+        which can be executed asynchronously.
+
+        Args:
+            client_id (str): The client id to await the public key of
+            callback (Callable): A callback function to execute once the key is received. Use 'lambda: None' to run no callback.
+            *args: The arguments of the callback function
+        """
+        db = self._db_connect()
+        while not db.user_known(client_id):
+            time.sleep(0.1)
+        db.close()
+        callback(*args)
+
     def _save_in_process_messages(self):
         """Save the status of currently in process messages so that they
         can be sent when next online."""
@@ -329,7 +461,8 @@ class Client:
         """Create a file containing some random plaintext and ciphertext
         encrypted with the currently set master key
         for checking the correctness of the master key in future runs.
-        This should only get run on the first run of the client program."""
+        This should only get run on the first run of the client program.
+        """
         with open(os.path.join(self._app_dir, "keytest"), 'w+', encoding='utf-8') as f:
             data = random.randbytes(1024)
             aes_iv = random.randrange(0, 2**128)
@@ -354,7 +487,7 @@ class Client:
 
     # methods for threads
     def _incoming_thread(self):
-        """The function run by the incoming thread. 
+        """The function run by the incoming thread.
         Keeps checking for new messages and processes them on a new thread as they arrive.
         """
         while self._running:
@@ -383,6 +516,114 @@ class Client:
             self._server.send(response)
 
     # message type handlers
+
+    def _handler_create_group(self, sender: str, values: list) -> None | tuple[str, tuple]:
+        """Handler function for the CreateGroup message type
+
+        Args:
+            sender (str): The client ID which sent the message
+            value (list): The parameters of the message
+                (encrypted group name, signature, group id, members)
+
+        Returns:
+            None | tuple[str, tuple]: None if successful
+                GroupIDInUse: There is already a group with that ID on this client
+                InvalidSignature: The message was improperly signed
+                GroupNameDecryptionFailure: The group name could not be decrypted
+        """
+        encrypted_group_name, signature, group_id, members = values
+        try:
+            group_name = rsa.decrypt(encrypted_group_name, self._priv)
+        except DecryptionFailureException:
+            return "GroupNameDecryptionFailure", (group_id, )
+        group_name = group_name.decode('utf-8')
+        signature_data = (name + hex(group_id) + ''.join(members)
+                          + self.get_id()).encode('utf-8')
+        db = self._db_connect()
+        if not db.user_known(sender):
+            self._request_key(sender)
+            self._await_key(sender, lambda: None)
+
+        if signing.verify(signature_data, signature, db.get_key(sender)):
+            if db.get_group_name(group_id):
+                response_signature_data = f"{group_id}{group_name}{sender}".encode('utf-8')
+                response_signature = signing.sign(response_signature_data, self._priv)
+                return "GroupIDInUse", (group_id, response_signature)
+            postfix = 1
+            while db.get_group_id(group_name):
+                group_name = f"{group_name} ({postfix})"
+                postfix += 1
+            db.create_group(group_name, group_id, sender, members)
+            db.close()
+            return None
+        else:
+            db.close()
+            return "InvalidSignature", (group_id, )
+
+    def _handler_group_id_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
+        """Handler function for the GroupIDInUse message type.
+
+        Args:
+            sender (str): The client ID which sent the message
+            value (list): The parameters of the message (group id, signature)
+
+        Returns:
+            tuple[str, tuple]: ChangeGroupID if successful,
+                NotAllowed: I am not the owner of the group
+                NoSuchGroup: The group ID does not exist
+                InvalidSignature: The message was improperly signed
+        """
+        group_id, request_signature = values
+
+        db = self._db_connect()
+        group_members = db.get_members(group_id)
+        if group_members:
+            if self.get_id() == db.get_owner(group_id) and sender in group_members:
+                if not self.user_known(sender):
+                    self._request_key(sender)
+                    self._await_key(sender, lambda: None)
+
+                request_signature_data = f"{group_id}{db.get_group_name(group_id)}{self.get_id()}".encode('utf-8')
+                if signing.verify(request_signature_data, request_signature, db.get_key(sender)):
+                    new_group_id = random.randrange(1, 2**64)
+                    while db.get_group_name(new_group_id):
+                        new_group_id = random.randrange(1, 2**64)
+                    db.change_group_id(group_id, new_group_id)
+                    for member in group_members:
+                        if member != sender:
+                            response_signature_data = f"{group_id}{new_group_id}{member}".encode('utf-8')
+                            response_signature = signing.sign(response_signature_data, self._priv)
+                            message = self._message_parser.construct_message(member, "ChangeGroupID",
+                                                                             group_id, new_group_id,
+                                                                             response_signature)
+                            self._server.send(message)
+                    response_signature_data = f"{group_id}{new_group_id}{sender}".encode('utf-8')
+                    response_signature = signing.sign(response_signature_data, self._priv)
+                    return "ChangeGroupID", (group_id, new_group_id, response_signature)
+                return "InvalidSignature", (group_id, )
+            return "NotAllowed", ("GroupIDInUse", )
+        return "NoSuchGroup", (group_id, )
+
+    def _handler_change_group_id(self, sender: str, values: list) -> None | tuple[str, tuple]:
+        """Handler function for the ChangeGroupID message type.
+
+        Args:
+            sender (str): The client ID which sent the message.
+            values (list): The parameters of the message (old group id, new group id)
+
+        Return:
+            None | tuple[str, tuple]: None if successful
+                NoSuchGroup: The group ID being changed does not exist.
+                NotAllowed: The sender is not the owner of the group.
+                GroupIDInUse: The new group ID is already in use on this client.
+        """
+        old_group_id, new_group_id = values
+        db = self._db_connect()
+        if sender == db.get_owner(old_group_id):
+            if db.get_group_name(old_group_id):
+
+            return "NoSuchGroup", (old_group_id, )
+        return "NotAllowed", ("ChangeGroupID")
 
     def _handler_key_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
         """Handler function for the KeyFound message type.
@@ -482,7 +723,8 @@ class Client:
             "client_id": sender,
             "dh_private": dh_priv,
             "encryption_key": encryption_key,
-            "data": ''}
+            "data": '',
+            "group": ''}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -537,13 +779,13 @@ class Client:
         """Handler function for the MessageData message type.
 
         Args:
-            sender (str): The client ID who sent the message. 
-            values (list): The parameters of the message (message index (int), AES initialisation vector (int), ciphertext (bytes)) 
+            sender (str): The client ID who sent the message.
+            values (list): The parameters of the message (message index (int), AES initialisation vector (int), ciphertext (bytes))
 
         Returns:
             tuple[str, tuple] | None: None if successful.
                 NoSuchIndex: The message index does not correspond to any in process message.
-                DecryptionFailure: The message ciphertext was unable to be decrypted.
+                MessageDecryptionFailure: The message ciphertext was unable to be decrypted.
                 NotAllowed: The message index is in use by a different client id to the sender.
         """
         message_index, aes_iv, ciphertext = values
@@ -558,7 +800,7 @@ class Client:
                 plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
             except DecryptionFailureException:
                 self._logger.log(f"Failed to decrypt message from {sender}", 1)
-                return "DecryptionFailure", (message_index, )
+                return "MessageDecryptionFailure", (message_index, )
             self._messages.pop(message_index)
             db = self._db_connect()
             db.insert_message(sender, plaintext, False)
@@ -576,7 +818,7 @@ class Client:
         """Handler function for the IndexInUse message type.
 
         Args:
-            sender (str): The client ID who sent the message. 
+            sender (str): The client ID who sent the message.
             values (list): The parameters of the message (message index (int))
 
         Returns:
@@ -600,8 +842,8 @@ class Client:
         """Handler function for the ResendAuthPacket message type.
 
         Args:
-            sender (str): The client ID who sent the message. 
-            values (list): The parameters of the message (message index (int)) 
+            sender (str): The client ID who sent the message.
+            values (list): The parameters of the message (message index (int))
 
         Returns:
             tuple[str, tuple]: NewMessage or MessageAccept depending on the message state.
@@ -637,8 +879,9 @@ class Client:
         """Connect to the client database.
 
         Returns:
-            Client_DB: A connection to the client database 
+            Client_DB: A connection to the client database
         """
         db = client_db.Client_DB(os.path.join(self._app_dir, "client.db"), os.path.join(
             self._app_dir, "keys") + "/", self._encryption_key, self._nickname_iv)
         return db
+
