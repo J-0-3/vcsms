@@ -204,7 +204,7 @@ class Client_DB:
             self._cached_nickname_plaintexts[encrypted_old_nickname] = old_nickname
 
         if new_nickname in self._cached_nickname_ciphertexts:
-            encrypted_new_nickname = self._cached_nickname_plaintexts[new_nickname]
+            encrypted_new_nickname = self._cached_nickname_ciphertexts[new_nickname]
         else:
             encrypted_new_nickname = aes256.encrypt_cbc(new_nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
             self._cached_nickname_ciphertexts[new_nickname] = encrypted_new_nickname

@@ -53,3 +53,9 @@ class MalformedMessageException(MessageParseException):
     """
     def __init__(self, message: bytes):
         super().__init__("Message is not of a valid parseable format: " + str(message), "UNKNOWN")
+
+class UnsupportedTypeException(MessageParseException):
+    """The type that was attempted to cast to/from is not implemented."""
+
+    def __init__(self, unsupported_type: type):
+        super().__init__(f"Type {unsupported_type.__name__} is not supported.")

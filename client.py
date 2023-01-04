@@ -35,7 +35,7 @@ class Application:
         self._contacts = client.get_contacts()
         if len(self._contacts) > 0:
             self.__focused_user = self._contacts[0]
-    
+
     @property
     def _focused_user(self) -> str:
         """Get the name of the currently focused user.
@@ -48,6 +48,7 @@ class Application:
     @_focused_user.setter
     def _focused_user(self, user: str):
         bottom_bar_redraw = bool(user) != bool(self.__focused_user)
+        # bottom bar should be redrawn if a user was previously or currently unfocused
         self.__focused_user = user
         if user:
             self._new_message[user] = False
@@ -135,9 +136,11 @@ class Application:
         messages_to_show = self._message_buffer[self._cur_scroll_position:end]
 
         for i, message in enumerate(messages_to_show[::-1]):
-            direction = 'TO' if message[1] else 'FROM'
-            message_text = message[0].decode('utf-8')
-            self._main_panel.addstr(i, 1, f"{direction} {self._focused_user}: {message_text}")
+            content, outgoing = message
+            direction = 'TO' if outgoing else 'FROM'
+            message_text = content.decode('utf-8')
+            display_string = f"{direction} {self._focused_user}: {message_text}"
+            self._main_panel.addstr(i, 1, display_string)
         self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS-1)
 
     def _ask_input(self, prompt: str) -> str:
@@ -219,7 +222,7 @@ class Application:
         self._stdscr.refresh()
         self._stdscr.nodelay(True)
 
-    def _cycle_contacts_message_view(self, increment: int):
+    def _cycle_focused_user(self, increment: int):
         if self._focused_user:
             current_contact_index = self._contacts.index(self._focused_user)
             next_index = (current_contact_index + increment) % len(self._contacts)
@@ -295,9 +298,9 @@ class Application:
             case 'd':
                 self._delete_contact()
             case 'l':
-                self._cycle_contacts_message_view(1)
+                self._cycle_focused_user(1)
             case 'h':
-                self._cycle_contacts_message_view(-1)
+                self._cycle_focused_user(-1)
             case 'j':
                 if self._focused_user:
                     if self._cur_scroll_position > 0:

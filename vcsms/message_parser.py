@@ -11,16 +11,16 @@ class MessageParser:
     
     The message schemas are split into incoming and outgoing messages (as some message types may be valid as responses to a server but not as requests from it.)
     and are always of the form (argument count, [argument types], [type conversion information]). The argument count should define how many arguments are expected,
-    the argument types should be python types such as int, str, bytes etc and the type conversion information should be the integer base for integers, string encoding for strings,
-    and None for bytes. 
+    the argument types should be python types such as int, str, bytes, list etc and the type conversion information should be the integer base for integers, string encoding for strings,
+    the item type for lists and None for bytes.
     
     The response map is a dictionary defining functions to execute when each message type is processed. These functions should always take in the client ID
     and message parameters and return a tuple containing the response message type and a tuple of message parameters. They should return None if no response
     is needed.
 
-    Two special response mappings are available which are "unknown" and "default". These define response functions to execute when a message type which is not defined 
+    Two special response mappings are available which are "unknown" and "default". These define response functions to execute when a message type which is not defined
     by any message schema or when a message type with no specified response map is processed. They do not need to be implemented but should take an extra parameter second containing
-    the message type that was read. 
+    the message type that was read.
 
     Messages always take the form ID:Type: followed by parameters separated by :.
     """
@@ -30,17 +30,17 @@ class MessageParser:
 
         Args:
             incoming_message_types (dict[str, tuple[int, list[type], list]]): A dictionary specifying message types and their corresponding schemas
-                (parameter count, parameter types, type conversion information (integer base, string encoding etc)) for incoming messages. 
+                (parameter count, parameter types, type conversion information (integer base, string encoding etc)) for incoming messages.
 
             outgoing_message_types (dict[str, tuple[int, list[type], list]]): A dictionary specifying message types and their corresponding schemas
-                (parameter count, parameter types, type conversion information (integer base, string encoding etc)) for outgoing messages.  
+                (parameter count, parameter types, type conversion information (integer base, string encoding etc)) for outgoing messages.
 
             response_map (dict[str, Callable]): A dictionary specifying message types and their corresponding handler functions which must take two arguments
                 of the sender's client ID (str) and the message parameters (tuple) except for the "unknown" and "default" handlers which must also take an extra second argument
                 of the message type that was read.
         """
         self._incoming = incoming_message_types
-        self._outgoing = outgoing_message_types    
+        self._outgoing = outgoing_message_types
         self._response_map = response_map
 
     def _interpret_message_values(self, values: list[bytes], message_type: str) -> list[any]:
@@ -51,11 +51,11 @@ class MessageParser:
             message_type (str): The name of the message type for which the values are meant. (e.g. NewMessage)
 
         Raises:
-            ParameterCountException: The number of values passed is incorrect according to the message schema. 
+            ParameterCountException: The number of values passed is incorrect according to the message schema.
             ParameterImpossibleTypeCastException: One of the values passed cannot be converted to the specified type.
 
         Returns:
-            list[any]: The values converted to the types specified by the message schema. 
+            list[any]: The values converted to the types specified by the message schema.
         """
         if message_type in self._incoming:
             message_schema = self._incoming[message_type]
@@ -68,15 +68,77 @@ class MessageParser:
         casted = []
         for i,v in enumerate(values):
             try:
-                if types[i] is int:
-                    casted.append(int(v, type_info[i]))
-                elif types[i] is str:
-                    casted.append(str(v, type_info[i]))
-                elif types[i] is bytes:
-                    casted.append(bytes.fromhex(v.decode('utf-8')))
-            except TypeError as exception:
+                casted.append(self._convert_from_bytes(v, types[i], type_info[i]))
+            except TypeError, ValueError as exception:
                 raise ParameterImpossibleTypeCastException(v, types[i], message_type) from exception
         return casted
+    
+    @staticmethod
+    def _convert_from_bytes(self, value: bytes, convert_to: type, conversion_info):
+        """Convert a value in byte form into the type specified.
+        
+        Supported types are int, str, bytes and list. (Lists must have all elements the same type)
+
+        Args:
+            value (bytes): The value in byte form to convert
+            convert_to (type): The type to convert it to
+            conversion_info: Additional information about how to convert to the given type.
+                For int: The base of the integer representation
+                For str: The string encoding used
+                For list: A tuple containing the type of the items and conversion information for that type respectively.
+                For bytes: None
+
+        """
+        if convert_to is int:
+            base = conversion_info
+            return int(value, base)
+        elif convert_to is str:
+            encoding = conversion_info
+            return str(bytes.fromhex(value.decode('utf-8')), encoding)
+        elif convert_to is bytes:
+            return bytes.fromhex(value.decode('utf-8'))
+        elif convert_to is list:
+            item_type, item_conversion_info = conversion_info
+            list_items = []
+            for item in bytes.fromhex(value.decode('utf-8')).split(b','):
+                list_items.append(self._convert_from_bytes(item, item_type, item_conversion_info))
+            return list_item
+        else:
+            raise UnsupportedTypeException(convert_to)
+
+    def _convert_to_bytes(self, value: int|str|list|bytes, conversion_info, message_type: str) -> bytes:
+        """Convert a value of any type to a byte representation.
+
+        Supported types are int, str, list and bytes. (Lists must have all elements the same type)
+
+        Args:
+            value (int, str, list, bytes): The value to convert
+            conversion_info: Additional information about to convert to bytes.
+                For int: The base of the integer representation
+                For str: The string encoding used
+                For list: Conversion information for the items in the list
+                For bytes: None
+            message_type (str): The message type being processed (e.g. NewMessage)
+
+        """
+        if isinstance(value, int):
+            if conversion_info == 10:
+                return str(value).encode('utf-8')
+            if conversion_info == 16:
+                return hex(value).encode('utf-8')[2:]
+        if isinstance(value, str):
+            return value.encode(conversion_info).hex().encode('utf-8')
+        if isinstance(value, bytes):
+            return value.hex().encode('utf-8')
+        if isinstance(value, list):
+            required_type, conversion_info = conversion_info
+            list_byte_repr = b""
+            for item in list[:-1]:
+                if not isinstance(item, required_type):
+                    raise ParameterWrongTypeException(item, required_type, message_type)
+                list_byte_repr += self._convert_to_bytes(item, conversion_info) + b','
+            return list_byte_repr.hex().encode('utf-8')
+        raise UnsupportedTypeException(type(value))
 
     def construct_message(self, recipient: str, message_type: str, *values) -> bytes:
         """Construct a message to a specified recipient of a specified type with the specified parameters.
@@ -84,13 +146,13 @@ class MessageParser:
         Args:
             recipient (str): The message's target recipient.
             message_type (str): The message type name (e.g. NewMessage).
-            values (Any...): The parameters for the message. 
+            values (Any...): The parameters for the message.
         Raises:
-            ParameterCountException: The wrong number of parameters were supplied for the specified message type. 
-            ParameterWrongTypeException: One of the parameters was of a type not specified in the message schema for the given type. 
+            ParameterCountException: The wrong number of parameters were supplied for the specified message type.
+            ParameterWrongTypeException: One of the parameters was of a type not specified in the message schema for the given type.
 
         Returns:
-            bytes: The raw message bytes. 
+            bytes: The raw message bytes.
         """
         if message_type in self._outgoing:
             message_schema = self._outgoing[message_type]
@@ -103,15 +165,7 @@ class MessageParser:
                 if type(values[i]) is not types[i]:
                     raise ParameterWrongTypeException(values[i], types[i], message_type)
 
-                if types[i] is int:
-                    if type_info[i] == 10:
-                        values_as_bytes.append(str(values[i]).encode('utf-8'))
-                    elif type_info[i] == 16:
-                        values_as_bytes.append(hex(values[i]).encode('utf-8')[2:])
-                elif types[i] is str:
-                    values_as_bytes.append(values[i].encode(type_info[i]))
-                elif types[i] is bytes:
-                    values_as_bytes.append(values[i].hex().encode('utf-8'))
+                values_as_bytes.append(self._convert_to_bytes(values[i], type_info[i]))
         else:
             values_as_bytes = values
         message = b''
@@ -127,15 +181,15 @@ class MessageParser:
         """Parse the raw bytes of a message and extract the sender, message type, and message parameters in the correct types.
 
         Args:
-            data (bytes): The raw message bytes 
+            data (bytes): The raw message bytes
 
         Raises:
-            MalformedMessageException: The message is not of a valid format. 
+            MalformedMessageException: The message is not of a valid format.
             ParameterCountException: The message did not supply the correct number of parameters.
             ParameterImpossibleTypeCastException: One of the message parameters could not be converted to the correct type.
 
         Returns:
-            tuple[str, str, list]: The sender, message type and parameters in the correct types. 
+            tuple[str, str, list]: The sender, message type and parameters in the correct types.
         """
         if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
             raise MalformedMessageException(data)
