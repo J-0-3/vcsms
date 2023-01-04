@@ -11,6 +11,8 @@ class Client_DB:
     _cached_message_plaintexts = {}
     _cached_nickname_ciphertexts = {}
     _cached_nickname_plaintexts = {}
+    _cached_groupname_plaintexts = {}
+    _cached_groupname_ciphertexts = {}
     """A connection to the client sqlite3 database"""
     def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
         """Constructor for the Client_DB class.
@@ -19,7 +21,8 @@ class Client_DB:
             path (str): The path to the sqlite3 database file.
             key_file_prefix (str): A string to prepend to all public key files.
             encryption_key (int): The encryption key to use when storing messages and nicknames.
-            nickname_iv (int): The initialization vector used when encrypting contacts' nicknames.
+            nickname_iv (int): The initialization vector used when encrypting contacts' nicknames
+                and the names of groups.
         """
         self._db = sqlite3.connect(path)
         self._key_file_prefix = key_file_prefix
@@ -31,8 +34,86 @@ class Client_DB:
 
         self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text unique, nickname blob unique)")
         self._db.execute("CREATE TABLE IF NOT EXISTS messages (id text, content blob, outgoing integer, timestamp integer, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text unique, name blob unique, owner_id text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text, is_owner integer)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (group_id text, sender_id text, content blob, timestamp integer, iv text)")
+        self._db.execute()
         self._db.commit()
 
+    def get_group_name(self, group_id: int) -> str | None:
+        """Get the group name associated with a given group id.
+
+        Args:
+            group_id (int): The group ID to lookup.
+
+        Returns:
+            str | None: The group name (None if it does not exist)
+        """
+        cursor = self._db.cursor()
+        cursor.execute("SELECT name FROM groups WHERE id=?", (group_id, ))
+        result = cursor.fetchone()
+        if result is None:
+            return None
+        group_name_encrypted = result[0]
+        if group_name_encrypted in self._cached_groupname_plaintexts:
+            return self._cached_groupname_plaintexts[group_name_encrypted]
+        else:
+            plaintext = aes256.decrypt_cbc(group_name_encrypted, self._encryption_key, self._nickname_iv).decode('utf-8')
+            self._cached_groupname_plaintexts[group_name_encrypted] = plaintext
+            self._cached_groupname_ciphertexts[plaintext] = group_name_encrypted
+            return plaintext
+    
+    def get_group_id(self, group_name: str) -> int | None:
+        """Get the group id associated with a given group name.
+        
+        Args:
+            group_name (str): The name of the group to lookup.
+            
+        Return:
+            int | None: The group id (None if it does not exist)
+        """
+        cursor = self._db.cursor()
+        if group_name in self._cached_groupname_ciphertexts:
+            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        else:
+            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
+            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
+        
+        cursor.execute("SELECT id FROM groups WHERE name=?", (encrypted_group_name, ))
+        result = cursor.fetchone()
+        if result is None:
+            return None
+        return result[0]
+    
+    def get_members(self, group_name: str) -> list[str]:
+        """Get all the members in the group with the given name.
+
+        Args:
+            group_name (str): The name of the group to lookup 
+
+        Returns:
+            list[str]: A list of all the members of the group (empty if the group does not exist)
+        """
+        cursor = self._db.cursor()
+        if group_name in self._cached_groupname_ciphertexts:
+            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        else:
+            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
+            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
+        cursor.execute(("SELECT client_id"
+                       "FROM group_members"
+                       "INNER JOIN groups"
+                       "ON groups.id = group_members.id"
+                       "WHERE groups.name = ?"), (encrypted_group_name, ))
+        
+        results = cursor.fetchall()
+        return [result[0] for result in results]
+        
+    def create_group(self, group_name: str, group_id: int, owner_id: str, members: list[str]):
+        self._db.execute("INSERT INTO ")
+        
     def get_nickname(self, client_id: str) -> str | None:
         """Get the nickname associated with a given client id.
 

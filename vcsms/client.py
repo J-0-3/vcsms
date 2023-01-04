@@ -15,7 +15,7 @@ from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
-from .exceptions.client import UserNotFoundException, IncorrectMasterKeyException
+from .exceptions.client import UserNotFoundException, IncorrectMasterKeyException, GroupNameInUseException
 from . import keys
 from . import signing
 from . import client_db
@@ -128,9 +128,9 @@ class Client:
             "MessageAccept": self._handler_message_accept,
             "MessageData": self._handler_message_data,
             "IndexInUse": self._handler_index_in_use,
-            "ResendAuthPacket": self._handler_resend_auth_packet
+            "ResendAuthPacket": self._handler_resend_auth_packet,
             "CreateGroup": self._handler_create_group,
-            "ChangeGroupID": self._handle_change_group_id,
+            "ChangeGroupID": self._handler_change_group_id,
             "GroupIDInUse": self._handler_group_id_in_use
         }
         self._message_parser = MessageParser(
@@ -207,10 +207,10 @@ class Client:
         return contacts
 
     def get_messages(self, name: str, count: int) -> list[tuple[bytes, bool]]:
-        """Get the last *count* messages to/from the specified user/group.
+        """Get the last *count* messages to/from the specified user.
 
         Args:
-            nickname (str): The nickname/group name to lookup.
+            nickname (str): The nickname to lookup.
             count (int): The (maximum) number of messages to/from the specified nickname to return.
 
         Returns:
@@ -220,13 +220,26 @@ class Client:
         """
         db = self._db_connect()
         messages = db.get_messages_by_nickname(name, count)
-        if messages:
-            db.close()
-            return messages
-        messages = db.get_group_messages(name, count)
         db.close()
         return messages
 
+    def get_group_messages(self, group_name: str, count: int) -> list[tuple[bytes, str]]:
+        """Get the last *count* messages to/from the specified group.
+
+        Args:
+            group_name (str): The name of the group to lookup 
+            count (int): The (maximum) number of messages to return 
+
+        Returns:
+            list[tuple[bytes, str]]: The last *count* messages to/from the group in time order
+                (newest first) in the format (message, sender) where message is the raw message
+                and sender is the client id who sent the message.
+        """
+        db = self._db_connect()
+        messages = db.get_group_messages(group_name, count)
+        db.close()
+        return messages
+    
     def message_count(self, nickname: str) -> int:
         """Get the number of previous messages to/from the specified nickname.
 
@@ -312,7 +325,7 @@ class Client:
         """
         member_ids = []
         db = self._db_connect()
-        for member in member_ids:
+        for member in members:
             member_id = db.get_id(member)
             if member_id is None:
                 if re.fullmatch("^[a-fA-F0-9]{64}$", member_id):
@@ -325,18 +338,19 @@ class Client:
         while db.get_group_name(group_id):
             group_id = random.randrange(1, 2**64)
 
+        if db.get_group_id(name) or db.get_id(name):
+            raise GroupNameInUseException(name)
+
         db.create_group(name, group_id, self.get_id(), members)
 
         def invite_user(user: str):
             key = db.get_key(user)
-            name_encryption_key = random.randrange(1, 2**256)
-            name_encryption_iv = random.randrange(1, 2**128)
 
             signature_data = (name + hex(group_id) + ''.join(member_ids) + user).encode('utf-8')
             signature = signing.sign(signature_data, self._priv)
             encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
             invite_message = self._message_parser.construct_message(
-                recipient, "CreateGroup",
+                user, "CreateGroup",
                 encrypted_group_name, signature, group_id, member_ids)
             self._server.send(invite_message)
 
@@ -409,6 +423,11 @@ class Client:
         return keys.fingerprint(self._pub)
 
     def _request_key(self, client_id: str):
+        """Request a user's public key from the server.
+
+        Args:
+            client_id (str): The client ID to request. 
+        """
         request_index = random.randrange(1, 2**64)
         while request_index in self._key_requests:
             request_index = random.randrange(1, 2**64)
@@ -537,7 +556,7 @@ class Client:
         except DecryptionFailureException:
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
-        signature_data = (name + hex(group_id) + ''.join(members)
+        signature_data = (group_name + hex(group_id) + ''.join(members)
                           + self.get_id()).encode('utf-8')
         db = self._db_connect()
         if not db.user_known(sender):
@@ -576,6 +595,7 @@ class Client:
         group_id, request_signature = values
 
         db = self._db_connect()
+        group_name = db.get_group_name(group_id)
         group_members = db.get_members(group_id)
         if group_members:
             if self.get_id() == db.get_owner(group_id) and sender in group_members:
@@ -583,7 +603,7 @@ class Client:
                     self._request_key(sender)
                     self._await_key(sender, lambda: None)
 
-                request_signature_data = f"{group_id}{db.get_group_name(group_id)}{self.get_id()}".encode('utf-8')
+                request_signature_data = f"{group_name}{group_id}{self.get_id()}".encode('utf-8')
                 if signing.verify(request_signature_data, request_signature, db.get_key(sender)):
                     new_group_id = random.randrange(1, 2**64)
                     while db.get_group_name(new_group_id):
@@ -591,13 +611,13 @@ class Client:
                     db.change_group_id(group_id, new_group_id)
                     for member in group_members:
                         if member != sender:
-                            response_signature_data = f"{group_id}{new_group_id}{member}".encode('utf-8')
+                            response_signature_data = f"{group_name}{group_id}{new_group_id}{member}".encode('utf-8')
                             response_signature = signing.sign(response_signature_data, self._priv)
                             message = self._message_parser.construct_message(member, "ChangeGroupID",
                                                                              group_id, new_group_id,
                                                                              response_signature)
                             self._server.send(message)
-                    response_signature_data = f"{group_id}{new_group_id}{sender}".encode('utf-8')
+                    response_signature_data = f"{group_name}{group_id}{new_group_id}{sender}".encode('utf-8')
                     response_signature = signing.sign(response_signature_data, self._priv)
                     return "ChangeGroupID", (group_id, new_group_id, response_signature)
                 return "InvalidSignature", (group_id, )
@@ -616,12 +636,25 @@ class Client:
                 NoSuchGroup: The group ID being changed does not exist.
                 NotAllowed: The sender is not the owner of the group.
                 GroupIDInUse: The new group ID is already in use on this client.
+                InvalidSignature: The message was incorrectly signed.
         """
-        old_group_id, new_group_id = values
+        old_group_id, new_group_id, signature = values
         db = self._db_connect()
         if sender == db.get_owner(old_group_id):
-            if db.get_group_name(old_group_id):
-
+            group_name = db.get_group_name(old_group_id)
+            if group_name:
+                signature_data = f"{group_name}{old_group_id}{new_group_id}{self.get_id()}".encode('utf-8')
+                if not db.user_known(sender):
+                    self._request_key(sender) 
+                    self._await_key(sender, lambda: None)
+                if signing.verify(signature_data, signature, db.get_key(sender)):
+                    if db.get_group_name(new_group_id):
+                        response_signature_data = f"{group_name}{new_group_id}{self.get_id()}".encode('utf-8')
+                        response_signature = signing.sign(response_signature_data, self._priv)
+                        return "GroupIDInUse", (new_group_id, response_signature)
+                    db.change_group_id(old_group_id, new_group_id) 
+                    return None
+                return "InvalidSignature", (old_group_id)
             return "NoSuchGroup", (old_group_id, )
         return "NotAllowed", ("ChangeGroupID")
 
