@@ -1,7 +1,7 @@
 """Defines a message parser class for use by the Client and Server classes."""
 import re
 from typing import Callable
-from .exceptions.message_parser import ParameterCountException, ParameterImpossibleTypeCastException, ParameterWrongTypeException, MalformedMessageException
+from .exceptions.message_parser import ParameterCountException, ParameterImpossibleTypeCastException, ParameterWrongTypeException, MalformedMessageException, UnsupportedTypeException
 
 
 class MessageParser:
@@ -69,11 +69,10 @@ class MessageParser:
         for i,v in enumerate(values):
             try:
                 casted.append(self._convert_from_bytes(v, types[i], type_info[i]))
-            except TypeError, ValueError as exception:
+            except (TypeError, ValueError) as exception:
                 raise ParameterImpossibleTypeCastException(v, types[i], message_type) from exception
         return casted
-    
-    @staticmethod
+
     def _convert_from_bytes(self, value: bytes, convert_to: type, conversion_info):
         """Convert a value in byte form into the type specified.
         
@@ -102,7 +101,7 @@ class MessageParser:
             list_items = []
             for item in bytes.fromhex(value.decode('utf-8')).split(b','):
                 list_items.append(self._convert_from_bytes(item, item_type, item_conversion_info))
-            return list_item
+            return list_items
         else:
             raise UnsupportedTypeException(convert_to)
 
@@ -133,10 +132,10 @@ class MessageParser:
         if isinstance(value, list):
             required_type, conversion_info = conversion_info
             list_byte_repr = b""
-            for item in list[:-1]:
+            for item in value[:-1]:
                 if not isinstance(item, required_type):
                     raise ParameterWrongTypeException(item, required_type, message_type)
-                list_byte_repr += self._convert_to_bytes(item, conversion_info) + b','
+                list_byte_repr += self._convert_to_bytes(item, conversion_info, message_type) + b','
             return list_byte_repr.hex().encode('utf-8')
         raise UnsupportedTypeException(type(value))
 
@@ -162,10 +161,10 @@ class MessageParser:
 
             values_as_bytes = []
             for i in range(length):
-                if type(values[i]) is not types[i]:
+                if not isinstance(values[i], types[i]):
                     raise ParameterWrongTypeException(values[i], types[i], message_type)
 
-                values_as_bytes.append(self._convert_to_bytes(values[i], type_info[i]))
+                values_as_bytes.append(self._convert_to_bytes(values[i], type_info[i], message_type))
         else:
             values_as_bytes = values
         message = b''

@@ -8,12 +8,12 @@ from .cryptographylib import aes256
 
 
 class Client_DB:
+    """A connection to the client sqlite3 database"""
     _cached_message_plaintexts = {}
     _cached_nickname_ciphertexts = {}
     _cached_nickname_plaintexts = {}
     _cached_groupname_plaintexts = {}
     _cached_groupname_ciphertexts = {}
-    """A connection to the client sqlite3 database"""
     def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
         """Constructor for the Client_DB class.
 
@@ -35,7 +35,7 @@ class Client_DB:
         self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text unique, nickname blob unique)")
         self._db.execute("CREATE TABLE IF NOT EXISTS messages (id text, content blob, outgoing integer, timestamp integer, iv text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text unique, name blob unique, owner_id text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text, is_owner integer)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (group_id text, sender_id text, content blob, timestamp integer, iv text)")
         self._db.execute()
         self._db.commit()
@@ -50,7 +50,7 @@ class Client_DB:
             str | None: The group name (None if it does not exist)
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT name FROM groups WHERE id=?", (group_id, ))
+        cursor.execute("SELECT name FROM groups WHERE id=?", (hex(group_id), ))
         result = cursor.fetchone()
         if result is None:
             return None
@@ -84,7 +84,7 @@ class Client_DB:
         result = cursor.fetchone()
         if result is None:
             return None
-        return result[0]
+        return int(result[0], 16)
     
     def get_members(self, group_name: str) -> list[str]:
         """Get all the members in the group with the given name.
@@ -111,9 +111,41 @@ class Client_DB:
         results = cursor.fetchall()
         return [result[0] for result in results]
         
-    def create_group(self, group_name: str, group_id: int, owner_id: str, members: list[str]):
-        self._db.execute("INSERT INTO ")
+    def get_members_by_id(self, group_id: int) -> list[str]:
+        """Get all the members in the group with the given id.
         
+        Args:
+            group_id (int): The numeric group id to lookup
+        
+        Returns:
+            list[str]: A list of all the members of the group (empty if the group does not exist)
+        """
+        cursor = self._db.cursor()
+        cursor.execute("SELECT client_id FROM group_members WHERE id=?", (group_id))
+        results = cursor.fetchall()
+        return [result[0] for result in results]
+
+    def create_group(self, group_name: str, group_id: int, owner_id: str, members: list[str]):
+        """Create a group of users with a given name, group id, owner and members.
+
+        Args:
+            group_name (str): The name of the group
+            group_id (int): The groups numeric ID
+            owner_id (str): The client ID of the group's owner
+            members (list[str]): The client IDs of all the members of the group
+                (can contain the owner but doesn't have to)
+        """
+        encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        self._cached_groupname_plaintexts[encrypted_group_name] = group_name
+        self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
+        self._db.execute("INSERT INTO groups VALUES (?, ?, ?)", (encrypted_group_name, hex(group_id), owner_id))
+        for member in members:
+            self._db.execute("INSERT INTO group_members VALUES (?, ?)", (hex(group_id), member))
+        if owner_id not in members:
+            self._db.execute("INSERT INTO group_members VALUES (?, ?)", (hex(group_id), owner_id))
+        self._db.commit()
+
+
     def get_nickname(self, client_id: str) -> str | None:
         """Get the nickname associated with a given client id.
 
@@ -162,6 +194,22 @@ class Client_DB:
             return None
         return result[0]
 
+    def get_owner(self, group_id: int) -> str | None:
+        """Get the client ID of the owner of a group
+
+        Args:
+            group_id (int): The ID of the group to lookup
+
+        Returns:
+            str | None: The client ID or None if the group does not exist
+        """
+        cursor = self._db.cursor()
+        cursor.execute("SELECT owner_id FROM groups WHERE id=?", (group_id, ))
+        result = cursor.fetchone()
+        if result is None:
+            return None
+        return result[0]
+
     def get_messages_by_id(self, client_id: str, count: int) -> list[tuple[bytes, bool]]:
         """Get the last *count* messages to/from a specified client ID in descending time order.
 
@@ -177,12 +225,15 @@ class Client_DB:
         cursor.execute("SELECT content, outgoing, iv FROM messages WHERE id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
         messages = []
         for m in cursor.fetchall():
-           if m[0] in self._cached_message_plaintexts:
-               messages.append((self._cached_message_plaintexts[m[0]], bool(m[1])))
-           else:
-               plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
-               self._cached_message_plaintexts[m[0]] = plaintext
-               messages.append((plaintext, bool(m[1])))
+            ciphertext, sent, aes_iv = m
+            aes_iv = int(aes_iv, 16)
+            sent = bool(sent)
+            if (ciphertext, aes_iv) in self._cached_message_plaintexts:
+                messages.append((self._cached_message_plaintexts[(ciphertext, aes_iv)], sent))
+            else:
+                plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, aes_iv)
+                self._cached_message_plaintexts[(ciphertext, aes_iv)] = plaintext
+                messages.append((plaintext, sent))
         return messages
 
     def get_messages_by_nickname(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
@@ -196,7 +247,12 @@ class Client_DB:
             list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the
                 raw messages bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
-        nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+        if nickname in self._cached_nickname_ciphertexts:
+            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
+        else:
+            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
+            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
         cursor = self._db.cursor()
         cursor.execute(("SELECT messages.content, messages.outgoing, messages.iv "
                        "FROM messages "
@@ -208,12 +264,54 @@ class Client_DB:
 
         messages = []
         for m in cursor.fetchall():
-           if m[0] in self._cached_message_plaintexts:
-               messages.append((self._cached_message_plaintexts[m[0]], bool(m[1])))
-           else:
-               plaintext = aes256.decrypt_cbc(m[0], self._encryption_key, int(m[2], 16))
-               self._cached_message_plaintexts[m[0]] = plaintext
-               messages.append((plaintext, bool(m[1])))
+            ciphertext, sent, aes_iv = m
+            sent = bool(sent)
+            aes_iv = int(aes_iv, 16)
+            if (ciphertext, aes_iv) in self._cached_message_plaintexts:
+                messages.append((self._cached_message_plaintexts[(ciphertext, aes_iv)], sent))
+            else:
+                plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, aes_iv)
+                self._cached_message_plaintexts[(ciphertext, aes_iv)] = plaintext
+                messages.append((plaintext, sent))
+        return messages
+
+    def get_group_messages(self, group_name: str, count: int) -> list[tuple[bytes, str]]:
+        """Get all messages to/from a given group
+
+        Args:
+            group_name (str): The name of the group to lookup 
+            count (int): The (maximum) number of messages to return  
+
+        Returns:
+            list[tuple[bytes, str]]: The last *count* messages in the form (message, sender) 
+        """
+        if group_name in self._cached_groupname_ciphertexts:
+            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        else:
+            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
+            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
+            
+        cursor = self._db.cursor()
+        cursor.execute(("SELECT group_messages.content, group_messages.iv, group_messages.sender_id "
+                        "FROM group_messages "
+                        "INNER JOIN groups "
+                        "ON group_messages.group_id=groups.id "
+                        "WHERE groups.name=? ORDER BY timestamp "
+                        "DESC "
+                        "LIMIT ?"), (encrypted_group_name, count))
+        results = cursor.fetchall()
+        
+        messages = []
+        for result in results:
+            encrypted_content, aes_iv, sender = result
+            aes_iv = int(aes_iv, 16)
+            if (encrypted_content, aes_iv) in self._cached_message_plaintexts:
+                messages.append((self._cached_message_plaintexts[(encrypted_content, aes_iv)], sender))
+            else:
+                content = aes256.decrypt_cbc(encrypted_content, self._encryption_key, aes_iv)
+                self._cached_message_plaintexts[(encrypted_content, aes_iv)] = content
+                messages.append((content, sender))
         return messages
 
     def count_messages(self, nickname: str) -> int:
@@ -248,10 +346,27 @@ class Client_DB:
         """
         aes_iv = random.randrange(0, 2**128)
         message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
-        self._cached_message_plaintexts[message_encrypted] = message
-        self._db.execute("INSERT INTO messages (id, content, outgoing, timestamp, iv) VALUES (?, ?, ?, strftime('%s','now'), ?)", (client_id, message_encrypted, int(sent), hex(aes_iv)))
+        self._cached_message_plaintexts[(message_encrypted, aes_iv)] = message
+        self._db.execute(("INSERT INTO messages (id, content, outgoing, timestamp, iv) "
+                          "VALUES (?, ?, ?, strftime('%s','now'), ?)"),
+                         (client_id, message_encrypted, int(sent), hex(aes_iv)))
         self._db.commit()
 
+    def insert_group_message(self, group_id: int, message: bytes, sender: str):
+        """Insert a group message into the database
+        
+        Args:
+            group_id (int): The numeric group id of which the message is part
+            message (bytes): The message contents
+            sender (str): The id of the message sender
+        """
+        aes_iv = random.randrange(0, 2**128)
+        message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
+        self._cached_message_plaintexts[(message_encrypted, aes_iv)] = message
+        self._db.execute("INSERT INTO group_messages VALUES (?, ?, ?, strftime('%s','now'), ?)",
+                         (hex(group_id), sender, message_encrypted, hex(aes_iv)))
+        self._db.commit()
+        
     def set_nickname(self, client_id: str, nickname: str):
         """Set the nickname for a given client id.
 
@@ -294,6 +409,46 @@ class Client_DB:
         self._db.execute("UPDATE nicknames SET nickname=? WHERE nickname=?", (encrypted_new_nickname, encrypted_old_nickname))
         self._db.commit()
 
+    def change_group_id(self, old_id: int, new_id: int):
+        """Update the group ID of a group
+
+        Args:
+            old_id (int): The ID of the group to update 
+            new_id (int): The new ID of the group 
+        """
+        self._db.execute("UPDATE groups SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UPDATE group_messages SET group_id=? WHERE group_id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UDPATE group_members SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.commit()
+
+    def delete_group_by_group_name(self, group_name: str):
+        """Delete the group with a given name
+
+        Args:
+            group_name (str): The name of the group to delete
+        """
+        if group_name in self._cached_groupname_ciphertexts:
+            encrypted_groupname = self._cached_groupname_ciphertexts[group_name]
+        else:
+            encrypted_groupname = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
+            self._cached_groupname_ciphertexts[group_name] = encrypted_groupname
+            self._cached_groupname_plaintexts[encrypted_groupname] = group_name
+        self._db.execute("DELETE FROM group_messages WHERE group_id IN (SELECT id FROM groups WHERE name=?)", (encrypted_groupname, ))
+        self._db.execute("DELETE FROM group_members WHERE id IN (SELECT id FROM groups WHERE name=?)", (encrypted_groupname))
+        self._db.execute("DELETE FROM groups WHERE name=?", (encrypted_groupname, ))
+        self._db.commit()
+    
+    def delete_group_by_group_id(self, group_id: int):
+        """Delete the group with a given group id
+
+        Args:
+            group_id (int): The numeric group id of the group to delete 
+        """
+        self._db.execute("DELETE FROM group_messages WHERE group_id=?", (hex(group_id), ))
+        self._db.execute("DELETE FROM group_members WHERE id=?", (hex(group_id), ))
+        self._db.execute("DELETE FROM groups WHERE id=?", (hex(group_id), ))
+        self._db.commit()
+
     def delete_contact_by_nickname(self, nickname: str):
         """Delete the contact entry and all messages associated with a given nickname.
         
@@ -311,6 +466,11 @@ class Client_DB:
         self._db.commit()
 
     def delete_contact_by_id(self, client_id: str):
+        """Delete all messages from and the contact record of a given client ID.
+
+        Args:
+            client_id (str): The ID of the contact to delete
+        """
         self._db.execute("DELETE FROM messages WHERE id=?", (client_id, ))
         self._db.execute("DELETE FROM nicknames WHERE id=?", (client_id, ))
         self._db.commit()

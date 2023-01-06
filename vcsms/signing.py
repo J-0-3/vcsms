@@ -1,22 +1,23 @@
-from .cryptographylib import rsa, sha256, dhke
 import time
+from .cryptographylib import rsa, sha256, dhke
 
 
-def sign(data: bytes, priv_key: tuple[int, int], ttl: int = 20) -> bytes:
+def sign(data: bytes, priv_key: tuple[int, int], ttl: int = 60) -> bytes:
     """Sign some data using a given RSA private key.
 
     Args:
         data (bytes): The data to sign.
         priv_key (tuple[int, int]): The RSA private key to use to sign the data in the form (exponent, modulus).
-        ttl (int, optional): The Time-To-Live in seconds for which the signature will be considered valid. Defaults to 20.
+        ttl (int, optional): The Time-To-Live in seconds for which the signature will be considered valid.
+            Defaults to 60.
 
     Returns:
         bytes: The (detached) signature
     """
     timestamp = time.time_ns().to_bytes(8, 'big')
     time_to_live = (ttl*1000000000).to_bytes(8, 'big')
-    hash = sha256.hash(data).to_bytes(32, 'big')
-    sig_data = timestamp + time_to_live + hash
+    data_hash = sha256.hash(data).to_bytes(32, 'big')
+    sig_data = timestamp + time_to_live + data_hash
     signature = rsa.encrypt(sig_data, *priv_key)
     return signature.hex().encode('utf-8')
 

@@ -6,6 +6,7 @@ import random
 import re
 import time
 import json
+from json.decoder import JSONDecodeError
 from queue import Queue
 from typing import Callable
 
@@ -121,6 +122,7 @@ class Client:
         self._encryption_key = sha256.hash(master_password.encode('utf-8'))
         self._nickname_iv = 0
         self._message_queue = Queue()
+        self._group_message_queue = Queue()
         message_response_map = {
             "KeyFound": self._handler_key_found,
             "KeyNotFound": self._handler_key_not_found,
@@ -191,7 +193,6 @@ class Client:
         Args:
             nickname (str): The nickname of the contact to delete.
         """
-        db = self._db_connect()
         db.delete_contact_by_nickname(nickname)
         db.close()
 
@@ -341,7 +342,7 @@ class Client:
         if db.get_group_id(name) or db.get_id(name):
             raise GroupNameInUseException(name)
 
-        db.create_group(name, group_id, self.get_id(), members)
+        db.create_group(name, group_id, self.get_id(), member_ids)
 
         def invite_user(user: str):
             key = db.get_key(user)
@@ -552,7 +553,7 @@ class Client:
         """
         encrypted_group_name, signature, group_id, members = values
         try:
-            group_name = rsa.decrypt(encrypted_group_name, self._priv)
+            group_name = rsa.decrypt(encrypted_group_name, self._priv[0], self._priv[1])
         except DecryptionFailureException:
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
@@ -599,7 +600,7 @@ class Client:
         group_members = db.get_members(group_id)
         if group_members:
             if self.get_id() == db.get_owner(group_id) and sender in group_members:
-                if not self.user_known(sender):
+                if not db.user_known(sender):
                     self._request_key(sender)
                     self._await_key(sender, lambda: None)
 
@@ -801,7 +802,10 @@ class Client:
             shared_secret = dhke.calculate_shared_key(
                 dh_priv, sender_dh_pub, self._dhke_group)
             encryption_key = sha256.hash(i_to_b(shared_secret))
-            plaintext = self._messages[message_index]["data"].encode('latin')
+            plaintext = json.dumps({
+                "data": self._messages[message_index]["data"],
+                "group": self._messages[message_index]["group"]
+            }).encode('utf-8')
             aes_iv = random.randrange(2, 2 ** 128)
             ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
             self._messages.pop(message_index)
@@ -834,17 +838,39 @@ class Client:
             except DecryptionFailureException:
                 self._logger.log(f"Failed to decrypt message from {sender}", 1)
                 return "MessageDecryptionFailure", (message_index, )
-            self._messages.pop(message_index)
+            try:
+                message_data = json.loads(plaintext)
+            except JSONDecodeError:
+                return "MessageMalformed", (message_index)
+            
+            group = message_data['group']
+            data = message_data['data'].encode('latin1')
+                
             db = self._db_connect()
-            db.insert_message(sender, plaintext, False)
-            nickname = db.get_nickname(sender)
-            if nickname is None:
-                db.set_nickname(sender, sender)
-                self._message_queue.put((sender, plaintext))
+            if group:
+                if sender in db.get_members_by_id(group):
+                    groupname = db.get_group_name(group)
+                    db.insert_group_message(group, data, sender)
+                    nickname = db.get_nickname(sender)
+                    if nickname is None:
+                        self._group_message_queue.put((groupname, (sender, data)))
+                    else:
+                        self._group_message_queue.put((groupname, (nickname, data)))
+                    db.close()
+                    self._messages.pop(message_index)
+                    return None
+                return "NotAllowed", ("MessageData", )
             else:
-                self._message_queue.put((nickname, plaintext))
-            db.close()
-            return None
+                db.insert_message(sender, plaintext, False)
+                nickname = db.get_nickname(sender)
+                if nickname is None:
+                    db.set_nickname(sender, sender)
+                    self._message_queue.put((sender, plaintext))
+                else:
+                    self._message_queue.put((nickname, plaintext))
+                db.close()
+                self._messages.pop(message_index)
+                return None
         return "NotAllowed", ("MessageData", )
 
     def _handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
