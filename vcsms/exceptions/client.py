@@ -34,4 +34,14 @@ class GroupNameInUseException(ClientException):
     a name that already refers to a group or user.
     """
     def __init__(self, name: str):
+        """Instantiate a GroupNameInUseException
+
+        Args:
+            name (str): The name of the group 
+        """
         super().__init__(f"Group {name} cannot be created as the name is already in use.")
+
+class GroupNotFoundException(ClientException):
+    """Raised when a group is referenced which does not exist."""
+    def __init__(self, name: str):
+        super().__init__(f"Group {name} does not exist")

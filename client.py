@@ -209,7 +209,7 @@ class Application:
                 self._client.delete_contact(self._focused_user)
                 self._contacts = self._client.get_contacts()
                 if len(self._contacts) > 0:
-                    self._focused_user = self._contacts[0]
+                    self._focused_user = self._contacts[0][0]
                 else:
                     self._focused_user = ""
 
@@ -263,16 +263,16 @@ class Application:
         self._running = True
         while self._running:
             if self._client.new_message():
-                sender, _ = self._client.receive()
+                sender, group, _ = self._client.receive()
                 if not self._focused_user:
-                    self._focused_user = sender
-                self._new_message[sender] = True
-                if self._focused_user == sender:
+                    self._focused_user = group or sender
+                self._new_message[group or sender] = True
+                if self._focused_user == group or sender:
                     self._max_scroll_position += 1
                     self._message_buffer_oldest = 0
                     self._cur_scroll_position = 0
-                if sender not in self._contacts:
-                    self._contacts.append(sender)
+                if (group or sender) not in self._contacts:
+                    self._contacts.append(group or sender)
                 self._draw_left_panel()
                 self._draw_main_panel()
                 self._draw_bottom_bar()

@@ -16,7 +16,10 @@ from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
-from .exceptions.client import UserNotFoundException, IncorrectMasterKeyException, GroupNameInUseException
+from .exceptions.client import UserNotFoundException
+from .exceptions.client import IncorrectMasterKeyException
+from .exceptions.client import GroupNameInUseException 
+from .exceptions.client import GroupNotFoundException
 from . import keys
 from . import signing
 from . import client_db
@@ -139,11 +142,12 @@ class Client:
             INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
         self._logger = logger
 
-    def receive(self) -> tuple[str, bytes]:
+    def receive(self) -> tuple[str, tuple[str, bytes]]:
         """Block until a new message is available and then return it.
 
         Returns:
-            tuple[str, bytes]: The message sender and data
+            tuple[str, str, bytes]: The message sender and a tuple 
+                containing the group name  
         """
         return self._message_queue.get()
 
@@ -193,34 +197,46 @@ class Client:
         Args:
             nickname (str): The nickname of the contact to delete.
         """
+        db = self._db_connect()
         db.delete_contact_by_nickname(nickname)
         db.close()
 
-    def get_contacts(self) -> list[str]:
-        """Get a list of all contacts known.
+    def get_contacts(self) -> list[tuple[str, bool]]:
+        """Get a list of all contacts (users and groups) known.
 
         Returns:
-            list[str]: The nicknames of every stored contact.
+            list[tuple[str, bool]]: The names of every stored contact and whether they are a group.
         """
         db = self._db_connect()
-        contacts = db.get_users()
+        users = db.get_users()
+        groups = db.get_groups()
+        contacts = [u for u in zip(users, [False] * len(users))] + [g for g in zip(groups, [True] * len(groups))]
         db.close()
         return contacts
 
-    def get_messages(self, name: str, count: int) -> list[tuple[bytes, bool]]:
-        """Get the last *count* messages to/from the specified user.
+    def get_messages(self, name: str, count: int) -> list[tuple[bytes, str]]:
+        """Get the last *count* messages to/from the specified user or group.
 
         Args:
-            nickname (str): The nickname to lookup.
-            count (int): The (maximum) number of messages to/from the specified nickname to return.
+            name (str): The user/group name to lookup.
+            count (int): The (maximum) number of messages to/from the specified contact to return.
 
         Returns:
             list[tuple[bytes, bool]]: The last *count* messages to/from the client in time order
-                (newest first) in the format (message, outgoing) where message is the raw message
-                and outgoing is a bool determining whether the message was sent or received.
+                (newest first) in the format (message, sender) where message is the raw message
+                and sender is the user who sent the message. 
         """
         db = self._db_connect()
-        messages = db.get_messages_by_nickname(name, count)
+        if db.get_group_id(name):
+            messages = db.get_group_messages(name) 
+        else:
+            messages_in_single_user_form = db.get_messages_by_nickname(name)
+            messages = []
+            my_id = self.get_id()
+            for message in messages_in_single_user_form:
+                data, outgoing = message
+                messages.append((data, my_id if outgoing else name)) 
+        
         db.close()
         return messages
 
@@ -265,6 +281,9 @@ class Client:
         db = self._db_connect()
         recipient_id = db.get_id(recipient)
         if recipient_id is None:
+            if db.get_group_id(recipient):
+                self._group_send(recipient, message)
+                return
             if re.fullmatch('^[a-fA-F0-9]{64}$', recipient):
                 db.set_nickname(recipient, recipient)
                 recipient_id = recipient
@@ -289,14 +308,17 @@ class Client:
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
         self._server.send(message)
 
-    def group_send(self, group: str, message: bytes):
+    def _group_send(self, group_name: str, message: bytes):
         """Send a message to all recipients in the sepecified group.
 
         Args:
-            group (str): The name of the group to sent the messages to.
+            group_name (str): The name of the group to sent the messages to.
             message (bytes): The message to send.
         """
         db = self._db_connect()
+        group = db.get_group_id(group_name)
+        if group is None:
+            raise GroupNotFoundException(group_name) 
         recipients = db.get_members(group)
 
         for recipient in recipients:
@@ -758,7 +780,7 @@ class Client:
             "dh_private": dh_priv,
             "encryption_key": encryption_key,
             "data": '',
-            "group": ''}
+            "group": 0}
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -847,30 +869,21 @@ class Client:
             data = message_data['data'].encode('latin1')
                 
             db = self._db_connect()
+            group_name = db.get_group_name(group) or "" 
+            sender_name = db.get_nickname(sender) or sender
             if group:
                 if sender in db.get_members_by_id(group):
-                    groupname = db.get_group_name(group)
                     db.insert_group_message(group, data, sender)
-                    nickname = db.get_nickname(sender)
-                    if nickname is None:
-                        self._group_message_queue.put((groupname, (sender, data)))
-                    else:
-                        self._group_message_queue.put((groupname, (nickname, data)))
-                    db.close()
-                    self._messages.pop(message_index)
-                    return None
-                return "NotAllowed", ("MessageData", )
-            else:
-                db.insert_message(sender, plaintext, False)
-                nickname = db.get_nickname(sender)
-                if nickname is None:
-                    db.set_nickname(sender, sender)
-                    self._message_queue.put((sender, plaintext))
                 else:
-                    self._message_queue.put((nickname, plaintext))
-                db.close()
-                self._messages.pop(message_index)
-                return None
+                    return "NotAllowed", ("MessageData", )                    
+            else:
+                if sender_name == sender:
+                    db.set_nickname(sender, sender)
+                db.insert_message(sender, data, False)
+            self._message_queue.put((sender_name, group_name, data)) 
+            db.close()
+            self._messages.pop(message_index)
+            return None
         return "NotAllowed", ("MessageData", )
 
     def _handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
