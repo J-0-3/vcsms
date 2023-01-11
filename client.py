@@ -32,9 +32,10 @@ class Application:
         self._running = False
         self._message_buffer = []
         self.__focused_user = ""
+        self._focused_user_index = 0
         self._contacts = client.get_contacts()
         if len(self._contacts) > 0:
-            self.__focused_user = self._contacts[0]
+            self.__focused_user = self._contacts[0][0]
 
     @property
     def _focused_user(self) -> str:
@@ -111,15 +112,36 @@ class Application:
         self._left_panel.clear()
         self._left_panel.addstr(1, 1, "Contacts: ")
         for i, contact in enumerate(self._contacts):
-            if contact == self._focused_user:
-                self._left_panel.addstr(i + 2, 1, f"[{contact}]")
-            else:
-                if contact in self._new_message and self._new_message[contact]:
-                    self._left_panel.addstr(i + 2, 1, f"*{contact}")
-                else:
-                    self._left_panel.addstr(i + 2, 1, contact)
+            contact_name, is_group = contact
+            display_name = contact_name
+            if contact_name == self._focused_user:
+                display_name = f"[{display_name}]"
+            if is_group:
+                display_name = f"%{display_name}"
+            if contact in self._new_message and self._new_message[contact]:
+                display_name = f"*{display_name}"
+            self._left_panel.addstr(i + 2, 1, display_name)
+
         self._left_panel.border()
         self._left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
+
+    def _create_group(self):
+        """Prompt the user to create a group chat."""
+        name = self._ask_input("Name")
+        users = []
+        if name:
+            while True:
+                user = self._ask_input("User")
+                if not user:
+                    break
+                users.append(user)
+        
+        if len(users) > 0:
+            self._client.create_group(name, *users)
+
+        self._draw_left_panel()
+        if not self._focused_user:
+            self._focused_user = name
 
     def _draw_main_panel(self):
         """Draw the main panel containing messages from the
@@ -136,10 +158,12 @@ class Application:
         messages_to_show = self._message_buffer[self._cur_scroll_position:end]
 
         for i, message in enumerate(messages_to_show[::-1]):
-            content, outgoing = message
-            direction = 'TO' if outgoing else 'FROM'
+            content, sender = message
             message_text = content.decode('utf-8')
-            display_string = f"{direction} {self._focused_user}: {message_text}"
+            if sender == self._client.get_id():
+                display_string = f"TO {self._focused_user}: {message_text}"
+            else:
+                display_string = f"FROM {sender}: {message_text}"
             self._main_panel.addstr(i, 1, display_string)
         self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS-1)
 
@@ -224,9 +248,9 @@ class Application:
 
     def _cycle_focused_user(self, increment: int):
         if self._focused_user:
-            current_contact_index = self._contacts.index(self._focused_user)
-            next_index = (current_contact_index + increment) % len(self._contacts)
-            self._focused_user = self._contacts[next_index]
+            next_index = (self._focused_user_index + increment) % len(self._contacts)
+            self._focused_user = self._contacts[next_index][0]
+            self._focused_user_index = next_index
 
     @property
     def running(self) -> bool:
@@ -271,8 +295,8 @@ class Application:
                     self._max_scroll_position += 1
                     self._message_buffer_oldest = 0
                     self._cur_scroll_position = 0
-                if (group or sender) not in self._contacts:
-                    self._contacts.append(group or sender)
+                if ((group or sender), bool(group)) not in self._contacts:
+                    self._contacts.append((group, bool(group)))
                 self._draw_left_panel()
                 self._draw_main_panel()
                 self._draw_bottom_bar()
@@ -313,6 +337,8 @@ class Application:
                         self._cur_scroll_position += 1
                     self._draw_main_panel()
                     self._draw_bottom_bar()
+            case 'c':
+                self._create_group()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

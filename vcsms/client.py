@@ -90,7 +90,6 @@ OUTGOING_MESSAGE_TYPES = {
     "GroupNameDecryptionFailure": (1, [int], 10)
 }
 
-
 class Client:
     """
     A VCSMS messaging client. Allows for communication with other VCSMS clients.
@@ -142,12 +141,11 @@ class Client:
             INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
         self._logger = logger
 
-    def receive(self) -> tuple[str, tuple[str, bytes]]:
+    def receive(self) -> tuple[str, str, bytes]:
         """Block until a new message is available and then return it.
 
         Returns:
-            tuple[str, str, bytes]: The message sender and a tuple 
-                containing the group name  
+            tuple[str, str, bytes]: The message sender, group name and contents 
         """
         return self._message_queue.get()
 
@@ -228,9 +226,9 @@ class Client:
         """
         db = self._db_connect()
         if db.get_group_id(name):
-            messages = db.get_group_messages(name) 
+            messages = db.get_group_messages(name, count) 
         else:
-            messages_in_single_user_form = db.get_messages_by_nickname(name)
+            messages_in_single_user_form = db.get_messages_by_nickname(name, count)
             messages = []
             my_id = self.get_id()
             for message in messages_in_single_user_form:
@@ -302,7 +300,7 @@ class Client:
             "dh_private": dh_priv,
             "encryption_key": 0,
             "data": message.decode('latin1'),  # needs to be JSON serializable
-            "group": ''
+            "group": 0 
         }
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
@@ -363,6 +361,7 @@ class Client:
 
         if db.get_group_id(name) or db.get_id(name):
             raise GroupNameInUseException(name)
+        self._logger.log(f"Creating group {name}: id = {group_id}, members = {member_ids}", 1)
 
         db.create_group(name, group_id, self.get_id(), member_ids)
 
@@ -561,7 +560,7 @@ class Client:
 
     def _handler_create_group(self, sender: str, values: list) -> None | tuple[str, tuple]:
         """Handler function for the CreateGroup message type
-
+        
         Args:
             sender (str): The client ID which sent the message
             value (list): The parameters of the message
@@ -581,6 +580,7 @@ class Client:
         group_name = group_name.decode('utf-8')
         signature_data = (group_name + hex(group_id) + ''.join(members)
                           + self.get_id()).encode('utf-8')
+        self._logger.log(f"Group creation from {sender}: name = {group_name}, id = {group_id}, members = {members}", 1)
         db = self._db_connect()
         if not db.user_known(sender):
             self._request_key(sender)
@@ -780,7 +780,7 @@ class Client:
             "dh_private": dh_priv,
             "encryption_key": encryption_key,
             "data": '',
-            "group": 0}
+            "group": 0 }
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -863,24 +863,27 @@ class Client:
             try:
                 message_data = json.loads(plaintext)
             except JSONDecodeError:
-                return "MessageMalformed", (message_index)
+                return "MessageMalformed", (message_index, )
             
-            group = message_data['group']
-            data = message_data['data'].encode('latin1')
+            try:
+                group = message_data['group']
+                data = message_data['data'].encode('latin1')
+            except KeyError:
+                return "MessageMalformed", (message_index, )
                 
             db = self._db_connect()
-            group_name = db.get_group_name(group) or "" 
+            group_name = db.get_group_name(group) or ""
             sender_name = db.get_nickname(sender) or sender
             if group:
                 if sender in db.get_members_by_id(group):
                     db.insert_group_message(group, data, sender)
                 else:
-                    return "NotAllowed", ("MessageData", )                    
+                    return "NotAllowed", ("MessageData", )
             else:
                 if sender_name == sender:
                     db.set_nickname(sender, sender)
                 db.insert_message(sender, data, False)
-            self._message_queue.put((sender_name, group_name, data)) 
+            self._message_queue.put((sender_name, group_name, data))
             db.close()
             self._messages.pop(message_index)
             return None

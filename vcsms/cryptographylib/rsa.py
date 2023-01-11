@@ -2,7 +2,7 @@ import random
 from typing import Union
 from . import primes
 from .utils import i_to_b
-
+from .exceptions import DecryptionFailureException
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b and also the values x and y such that ax + by = gcd (a,b).
@@ -72,8 +72,8 @@ def encrypt(plaintext: bytes, exponent: int, modulus: int) -> bytes:
         int: The encrypted ciphertext
     """
 
-    plaintext = int.from_bytes(plaintext, 'big')
-    return i_to_b(pow(plaintext, exponent, modulus))
+    plaintext_as_int = int.from_bytes(b'RSA' + plaintext, 'big')
+    return i_to_b(pow(plaintext_as_int, exponent, modulus))
 
 
 def decrypt(ciphertext: bytes, exponent: int, modulus: int) -> bytes:
@@ -88,7 +88,11 @@ def decrypt(ciphertext: bytes, exponent: int, modulus: int) -> bytes:
         bytes: The decrypted plaintext
     """
 
-    return i_to_b(pow(int.from_bytes(ciphertext, 'big'), exponent, modulus))
+    plaintext = i_to_b(pow(int.from_bytes(ciphertext, 'big'), exponent, modulus))
+    if plaintext[:3] == b'RSA':
+        return plaintext[3:]
+    else:
+        raise DecryptionFailureException(exponent)
 
 
 def gen_keypair(length: int = 2048):
@@ -112,6 +116,9 @@ def gen_keypair(length: int = 2048):
             q = random.randrange(1, 2**(length//2))
 
         pub, priv = calculate_keys(p, q)
-        ciphertext = encrypt(b'\xb0\x0b\x1e\x50', *pub)
-        if decrypt(ciphertext, *priv) == b'\xb0\x0b\x1e\x50':
-            return pub, priv
+        try:
+            decrypt(encrypt(b'test123abc', *pub), *priv)
+            decrypt(encrypt(b'cba321tset', *priv), *pub)
+        except DecryptionFailureException:
+            continue
+        return pub, priv

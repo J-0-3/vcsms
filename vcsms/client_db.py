@@ -503,7 +503,8 @@ class Client_DB:
         Returns:
             bool: Whether or not the client's public key exists.
         """
-        return os.path.exists(self._key_file_prefix + client_id + ".pub")
+        keypath = self._key_file_prefix + client_id + ".pub"
+        return os.path.exists(keypath) and os.path.getsize(keypath) > 0
 
     def get_key(self, client_id: str) -> tuple[int, int]:
         """Get the associated public key for a given client ID.

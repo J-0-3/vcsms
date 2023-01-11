@@ -1,6 +1,6 @@
 import time
 from .cryptographylib import rsa, sha256, dhke
-
+from .cryptographylib.exceptions import DecryptionFailureException
 
 def sign(data: bytes, priv_key: tuple[int, int], ttl: int = 60) -> bytes:
     """Sign some data using a given RSA private key.
@@ -34,7 +34,10 @@ def verify(data: bytes, signature: bytes, pub_key: tuple[int, int]) -> bool:
         bool: Whether the signature is valid
     """
     data_hash = sha256.hash(data)
-    signature_data = rsa.decrypt(bytes.fromhex(signature.decode('utf-8')), *pub_key)
+    try:
+        signature_data = rsa.decrypt(bytes.fromhex(signature.decode('utf-8')), *pub_key)
+    except DecryptionFailureException:
+        return False
     timestamp = int.from_bytes(signature_data[0:8], 'big')
     ttl = int.from_bytes(signature_data[8:16], 'big')
     signature_hash = int.from_bytes(signature_data[16:], 'big')

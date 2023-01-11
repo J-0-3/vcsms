@@ -1,0 +1,3 @@
+Wed Jan 11 10:09:21 2023|1|Group creation from 4274ccbc8bb98488a3a70d3df6fee7d7f5140a4f490a05c49d4e76bffe215940: name = mygroup, id = 2045738271982711088, members = ['040239a84fbc02bf0c4d5efb15a98db895c1e6d93ca0cbe264c862fd66e07321', '']
+Wed Jan 11 10:48:02 2023|2|040239a84fbc02bf0c4d5efb15a98db895c1e6d93ca0cbe264c862fd66e07321 requested that I resend an authentication packet for message index 14624429758174144830
+Wed Jan 11 10:48:05 2023|2|Message to unknown user 040239a84fbc02bf0c4d5efb15a98db895c1e6d93ca0cbe264c862fd66e07321

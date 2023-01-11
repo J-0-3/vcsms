@@ -136,6 +136,7 @@ class MessageParser:
                 if not isinstance(item, required_type):
                     raise ParameterWrongTypeException(item, required_type, message_type)
                 list_byte_repr += self._convert_to_bytes(item, conversion_info, message_type) + b','
+            list_byte_repr += self._convert_to_bytes(value[-1], conversion_info, message_type)
             return list_byte_repr.hex().encode('utf-8')
         raise UnsupportedTypeException(type(value))
 
