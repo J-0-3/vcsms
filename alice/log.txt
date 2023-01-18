@@ -1,0 +1,44 @@
+Mon Jan 16 14:56:53 2023|1|Group creation from c233a6df3cf539ce781913d5c554d8d3b230e163c2268e2f0d1f780a067ba0c5: name = mygroup, id = 12509338027579723550, members = ['9f00b8cbffc5751d28c363310f193c73a47d4c74051061f80bd125c1580468be', '3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea']
+Mon Jan 16 20:06:35 2023|3|Trying to close connection to server
+Mon Jan 16 20:06:35 2023|3|Able to close connection
+Mon Jan 16 20:06:35 2023|2|Closed connection to server
+Mon Jan 16 21:09:44 2023|3|Trying to close connection to server
+Mon Jan 16 21:09:44 2023|3|Able to close connection
+Mon Jan 16 21:09:44 2023|2|Closed connection to server
+Mon Jan 16 21:09:59 2023|1|Invalid ID Format
+Mon Jan 16 23:01:32 2023|3|Group 12509338027579723550 message hi claire! -> 3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea
+Mon Jan 16 23:01:32 2023|3|Group 12509338027579723550 message hi claire! -> c233a6df3cf539ce781913d5c554d8d3b230e163c2268e2f0d1f780a067ba0c5
+Wed Jan 18 21:25:55 2023|3|Group 12509338027579723550 message hi guys hows it going -> 3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea
+Wed Jan 18 21:25:55 2023|3|Group 12509338027579723550 message hi guys hows it going -> c233a6df3cf539ce781913d5c554d8d3b230e163c2268e2f0d1f780a067ba0c5
+Wed Jan 18 21:25:57 2023|2|3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea requested that I resend an authentication packet for message index 5347513535656317123
+Wed Jan 18 21:26:00 2023|2|Message to unknown user 3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea
+Wed Jan 18 21:26:21 2023|3|Trying to close connection to server
+Wed Jan 18 21:26:21 2023|3|Able to close connection
+Wed Jan 18 21:26:21 2023|2|Closed connection to server
+Wed Jan 18 21:45:44 2023|3|Trying to close connection to server
+Wed Jan 18 21:45:45 2023|3|Able to close connection
+Wed Jan 18 21:45:45 2023|2|Closed connection to server
+Wed Jan 18 21:47:55 2023|3|Trying to close connection to server
+Wed Jan 18 21:47:55 2023|3|Able to close connection
+Wed Jan 18 21:47:55 2023|2|Closed connection to server
+Wed Jan 18 21:48:01 2023|3|Trying to close connection to server
+Wed Jan 18 21:48:02 2023|3|Able to close connection
+Wed Jan 18 21:48:02 2023|2|Closed connection to server
+Wed Jan 18 21:48:43 2023|3|Trying to close connection to server
+Wed Jan 18 21:48:43 2023|3|Able to close connection
+Wed Jan 18 21:48:43 2023|2|Closed connection to server
+Wed Jan 18 22:00:03 2023|3|Trying to close connection to server
+Wed Jan 18 22:00:03 2023|3|Able to close connection
+Wed Jan 18 22:00:03 2023|2|Closed connection to server
+Wed Jan 18 22:01:22 2023|3|Trying to close connection to server
+Wed Jan 18 22:01:22 2023|3|Able to close connection
+Wed Jan 18 22:01:22 2023|2|Closed connection to server
+Wed Jan 18 22:03:26 2023|3|Trying to close connection to server
+Wed Jan 18 22:03:26 2023|3|Able to close connection
+Wed Jan 18 22:03:26 2023|2|Closed connection to server
+Wed Jan 18 22:04:56 2023|3|Trying to close connection to server
+Wed Jan 18 22:04:56 2023|3|Able to close connection
+Wed Jan 18 22:04:56 2023|2|Closed connection to server
+Wed Jan 18 22:05:04 2023|3|Trying to close connection to server
+Wed Jan 18 22:05:04 2023|3|Able to close connection
+Wed Jan 18 22:05:04 2023|2|Closed connection to server

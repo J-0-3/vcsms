@@ -1,0 +1,10 @@
+Mon Jan 16 14:58:45 2023|1|Group creation from c233a6df3cf539ce781913d5c554d8d3b230e163c2268e2f0d1f780a067ba0c5: name = asg3hgahego3haoigsgoi3qighsaghwoahgoishgoihwoiahgoihwgoihasg, id = 8565892209639016777, members = ['3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea', 'ab9f11e2517ae069019bc2a8613df9c7af1bc87d4429fde4a06c00461a16d6cd']
+Mon Jan 16 20:06:41 2023|3|Trying to close connection to server
+Mon Jan 16 20:06:42 2023|3|Able to close connection
+Mon Jan 16 20:06:42 2023|2|Closed connection to server
+Mon Jan 16 20:46:27 2023|3|Trying to close connection to server
+Mon Jan 16 20:46:27 2023|3|Able to close connection
+Mon Jan 16 20:46:27 2023|2|Closed connection to server
+Wed Jan 18 21:26:23 2023|3|Trying to close connection to server
+Wed Jan 18 21:26:23 2023|3|Able to close connection
+Wed Jan 18 21:26:23 2023|2|Closed connection to server

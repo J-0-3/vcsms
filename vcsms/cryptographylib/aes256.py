@@ -196,11 +196,6 @@ def transpose_matrix(m: list) -> list:
             [m[0][1], m[1][1], m[2][1], m[3][1]],
             [m[0][2], m[1][2], m[2][2], m[3][2]],
             [m[0][3], m[1][3], m[2][3], m[3][3]]]
-    # transposed = [[0,0,0,0], [0,0,0,0], [0,0,0,0], [0,0,0,0]]
-    # for r in range(len(m)):
-    #     for c in range(len(m[r])):
-    #         transposed[c][r] = m[r][c]
-    # return transposed
 
 
 def sbox_lookup(b: int, sbox: list) -> int:
@@ -549,7 +544,7 @@ def encrypt_ecb(data: bytes, key: int) -> bytes:
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes(data, 'big')
+    data_as_int = int.from_bytes('AES' + data, 'big')
     message_blocks = split_blocks(data_as_int)
     key_schedule = expand_key(key)
     ciphertext_blocks = [encrypt_block(key_schedule, block) for block in message_blocks]
@@ -581,7 +576,10 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
         message |= (block << shift)
         shift -= 128
 
-    return i_to_b(message)
+    plaintext = i_to_b(message)
+    if plaintext[0:3] == b'AES':
+        return plaintext[3:]
+    raise DecryptionFailureException(key)
 
 
 def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:

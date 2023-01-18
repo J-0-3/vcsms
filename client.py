@@ -4,10 +4,36 @@ import curses.textpad
 import argparse
 import json
 import os
+import time
 from vcsms.client import Client
 from vcsms.logger import Logger
-from vcsms.exceptions.client import IncorrectMasterKeyException
+from vcsms.exceptions.client import IncorrectMasterKeyException, ClientException
 
+class ScrollableTextBox:
+    def __init__(self, y: int, x: int, height: int, width: int):
+        self.y = y
+        self.x = x
+        self.height = height
+        self.cur_scroll = 0
+        self.lines = []
+        self.width = width
+        self.pad = curses.newpad(height, width)
+    
+    def display(self):
+        top_line = max(0, len(self.lines) - y - self.cur_scroll)
+        self.pad.refresh(top_line, 0, y, x, y + height, x + width)
+
+    def add_string(self, string: str):
+        while string > self.width:
+            self.lines.append(string[:self.width])
+            string = string[self.width:]
+        self.lines.append(string)
+
+    def scroll_down(amount: int):
+        self.cur_scroll = max(0, self.cur_scroll - amount)
+    
+    def scroll_up(amount: int):
+        self.cur_scroll = max(self.cur_scroll + amount, len(self.lines) - y)
 
 class Application:
     """A curses based client application for VCSMS"""
@@ -19,6 +45,7 @@ class Application:
                 Provides the actual client functionality.
         """
         self._client = client
+        self._id = client.get_id()
         self._stdscr = None
         self._top_bar = None
         self._bottom_bar = None
@@ -33,6 +60,7 @@ class Application:
         self._message_buffer = []
         self.__focused_user = ""
         self._focused_user_index = 0
+        self._panel_sizes = {}
         self._contacts = client.get_contacts()
         if len(self._contacts) > 0:
             self.__focused_user = self._contacts[0][0]
@@ -64,6 +92,7 @@ class Application:
         if bottom_bar_redraw:
             self._draw_bottom_bar()
 
+
     def _draw_top_bar(self):
         """Draw the top bar which displays the user's client ID"""
         self._top_bar.clear()
@@ -71,16 +100,17 @@ class Application:
         self._top_bar.border()
         self._top_bar.refresh()
 
-    def _draw_bottom_bar(self, message: str = ""):
+    def _draw_bottom_bar(self, message: str = "", color_pair: int = 0):
         """Draw the bottom bar containing an optional non-default message.
 
         By default displays dynamic usage instructions
         Args:
             message (str, optional): The message to display.
+            color_pair (int, optional): The curses color pair to use.
         """
         self._bottom_bar.clear()
         if message:
-            self._bottom_bar.addstr(1, 1, message)
+            self._bottom_bar.addstr(1, 1, message, curses.color_pair(color_pair))
         else:
             instructions = ""
             if self._focused_user:
@@ -107,6 +137,11 @@ class Application:
         self._left_panel_bottom_bar.border()
         self._left_panel_bottom_bar.refresh()
 
+    def _flash_error(self, error: str):
+        self._draw_bottom_bar(error, 1)
+        time.sleep(1)
+        self._draw_bottom_bar()
+
     def _draw_left_panel(self):
         """Draw the left panel containing the user's contacts."""
         self._left_panel.clear()
@@ -118,12 +153,29 @@ class Application:
                 display_name = f"[{display_name}]"
             if is_group:
                 display_name = f"%{display_name}"
-            if contact in self._new_message and self._new_message[contact]:
+            if contact_name in self._new_message and self._new_message[contact_name] and self._focused_user != contact_name:
                 display_name = f"*{display_name}"
             self._left_panel.addstr(i + 2, 1, display_name)
 
         self._left_panel.border()
         self._left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
+
+    def _get_message_lines(self, name: str, count: int):
+        """Get the last *count* messages in ascending time order propertly formatted and split into lines
+        """
+        messages = self._client.get_messages(name, count)[::-1]
+        lines = []
+        max_width = self._panel_sizes["main"][1]
+        for m, s in messages:
+            if s == self._id:
+                display_format = f"TO {name}: {m.decode('utf-8')}"
+            else:
+                display_format = f"FROM {s}: {m.decode('utf-8')}"
+            while len(display_format) > max_width:
+                lines.append(display_format[:max_width])
+                display_format = display_format[max_width:]
+            lines.append(display_format)
+        return lines
 
     def _create_group(self):
         """Prompt the user to create a group chat."""
@@ -137,8 +189,13 @@ class Application:
                 users.append(user)
         
         if len(users) > 0:
-            self._client.create_group(name, *users)
+            try:
+                self._client.create_group(name, *users)
+            except ClientException as e:
+                self._flash_error(e.message)
+                return
 
+        self._contacts = self._client.get_contacts()
         self._draw_left_panel()
         if not self._focused_user:
             self._focused_user = name
@@ -151,37 +208,31 @@ class Application:
         num_to_display = curses.LINES - 8
         if self._cur_scroll_position + num_to_display > self._message_buffer_oldest:
             num_to_load = self._cur_scroll_position + num_to_display + 20
-            self._message_buffer = self._client.get_messages(self._focused_user, num_to_load)
-            self._message_buffer_oldest = num_to_load
+            self._message_buffer = self._get_message_lines(self._focused_user, num_to_load)
+            self._message_buffer_oldest = len(self._message_buffer)
 
         end = self._cur_scroll_position + num_to_display
         messages_to_show = self._message_buffer[self._cur_scroll_position:end]
 
-        for i, message in enumerate(messages_to_show[::-1]):
-            content, sender = message
-            message_text = content.decode('utf-8')
-            if sender == self._client.get_id():
-                display_string = f"TO {self._focused_user}: {message_text}"
-            else:
-                display_string = f"FROM {sender}: {message_text}"
-            self._main_panel.addstr(i, 1, display_string)
+        for i, message in enumerate(messages_to_show):
+            self._main_panel.addstr(i, 1, message)
         self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS-1)
 
-    def _ask_input(self, prompt: str) -> str:
+    def _ask_input(self, prompt: str, height: int = 1) -> str:
         """Ask for input given a specific prompt.
 
         Args:
             label (str): The prompt given to the user.
+            height (int): The height of the textbox.
 
         Returns:
             str: The input typed by the user
         """
         self._draw_bottom_bar(f"{prompt}: ")
-        textbox_height = 1
         textbox_width = curses.COLS - (26 + len(prompt) + 3)
         textbox_x = 26 + len(prompt) + 3
-        textbox_y = curses.LINES - 2
-        textbox_container = curses.newwin(textbox_height, textbox_width, textbox_y, textbox_x)
+        textbox_y = curses.LINES - (height + 1)
+        textbox_container = curses.newwin(height, textbox_width, textbox_y, textbox_x)
         textbox = curses.textpad.Textbox(textbox_container)
         self._stdscr.refresh()
         textbox.edit()
@@ -192,7 +243,12 @@ class Application:
         """Add a new contact with user supplied nickname and client ID"""
         nickname = self._ask_input("Name")
         client_id = self._ask_input("ID")
-        self._client.add_contact(nickname, client_id)
+        try:
+            self._client.add_contact(nickname, client_id)
+        except ClientException as e:
+            self._flash_error(e.message)
+            return
+
         self._contacts = self._client.get_contacts()
         if self._focused_user == client_id or not self._focused_user:
             self._focused_user = nickname
@@ -206,9 +262,13 @@ class Application:
         currently focused user.
         """
         if self._focused_user:
-            message = self._ask_input("Message")
+            message = self._ask_input("Message", 3)
             if message:
-                self._client.send(self._focused_user, message.encode())
+                try:
+                    self._client.send(self._focused_user, message.encode())
+                except ClientException as e:
+                    self._flash_error(e.message)
+                    return
                 self._max_scroll_position += 1
                 self._message_buffer_oldest = 0
                 self._cur_scroll_position = 0
@@ -222,7 +282,10 @@ class Application:
         if self._focused_user:
             new_name = self._ask_input("New Name")
             if new_name:
-                self._client.rename_contact(self._focused_user, new_name)
+                try:
+                    self._client.rename_contact(self._focused_user, new_name)
+                except ClientException as e:
+                    self._flash_error(e.message)
                 self._contacts = self._client.get_contacts()
                 self._focused_user = new_name
 
@@ -243,6 +306,13 @@ class Application:
         self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
         self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
         self._main_panel = curses.newpad(curses.LINES - 6, curses.COLS - 26)
+        self._panel_sizes = {
+            "main": (curses.LINES - 6, curses.COLS - 26),
+            "left": (curses.LINES - 3, 26),
+            "bottom": (3, curses.COLS - 26),
+            "top": (3, curses.COLS - 26),
+            "left_bottom": (3, 26)
+        }
         self._stdscr.refresh()
         self._stdscr.nodelay(True)
 
@@ -271,6 +341,7 @@ class Application:
                 Provided by curses.wrapper
         """
         self._stdscr = stdscr
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
         if curses.COLS < 102 or curses.LINES < 9:
             self._client.quit()
             raise Exception("Window too small. Resize your terminal.")
@@ -288,18 +359,18 @@ class Application:
         while self._running:
             if self._client.new_message():
                 sender, group, _ = self._client.receive()
-                if not self._focused_user:
-                    self._focused_user = group or sender
-                self._new_message[group or sender] = True
-                if self._focused_user == group or sender:
+                contact_name = group or sender
+                self._new_message[contact_name] = True
+                if self._focused_user == contact_name:
                     self._max_scroll_position += 1
                     self._message_buffer_oldest = 0
                     self._cur_scroll_position = 0
-                if ((group or sender), bool(group)) not in self._contacts:
-                    self._contacts.append((group, bool(group)))
+                    self._draw_main_panel()
+                if (contact_name, bool(group)) not in self._contacts:
+                    self._contacts.append((contact_name, bool(group)))
+                if not self._focused_user:
+                    self._focused_user = chat_name
                 self._draw_left_panel()
-                self._draw_main_panel()
-                self._draw_bottom_bar()
             self._handle_input()
 
     def _handle_input(self):

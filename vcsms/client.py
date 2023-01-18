@@ -18,7 +18,9 @@ from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
 from .exceptions.client import UserNotFoundException
 from .exceptions.client import IncorrectMasterKeyException
-from .exceptions.client import GroupNameInUseException 
+from .exceptions.client import GroupNameInUseException
+from .exceptions.client import NickNameInUseException
+from .exceptions.client import UserAlreadyExistsException
 from .exceptions.client import GroupNotFoundException
 from . import keys
 from . import signing
@@ -28,66 +30,66 @@ from .logger import Logger
 INCOMING_MESSAGE_TYPES = {
     # type       argc arg types         additional type info (encoding, base, etc)
     # message index, diffie hellman pub, diffie hellman sig
-    "NewMessage": (3, [int, int, bytes], [10, 16, None]),
+    "NewMessage": ([int, int, bytes], [10, 16, None]),
     # message index, diffie hellman pub, diffie hellman sig
-    "MessageAccept": (3, [int, int, bytes], [10, 16, None]),
+    "MessageAccept": ([int, int, bytes], [10, 16, None]),
     # message index, initialisation vector, message data
-    "MessageData": (3, [int, int, bytes], [10, 16, None]),
+    "MessageData": ([int, int, bytes], [10, 16, None]),
     # request index, exponent, modulus (server only)
-    "KeyFound": (3, [int, int, int], [10, 16, 16]),
+    "KeyFound": ([int, int, int], [10, 16, 16]),
     # request index (server only)
-    "KeyNotFound": (1, [int], [10]),
+    "KeyNotFound": ([int], [10]),
     # message index
-    "IndexInUse": (1, [int], [10]),
-    "MessageDecryptionFailure": (1, [int], [10]),
-    "InvalidSignature": (1, [int], [10]),
-    "NoSuchIndex": (1, [int], [10]),
-    "ResendAuthPacket": (1, [int], [10]),
+    "IndexInUse": ([int], [10]),
+    "MessageDecryptionFailure": ([int], [10]),
+    "InvalidSignature": ([int], [10]),
+    "NoSuchIndex": ([int], [10]),
+    "ResendAuthPacket": ([int], [10]),
     # message type
-    "UnknownMessageType": (1, [str], ['utf-8']),
-    "NotAllowed": (1, [str], ['utf-8']),
+    "UnknownMessageType": ([str], ['utf-8']),
+    "NotAllowed": ([str], ['utf-8']),
     # encrypted group name, signature, group id, members
-    "CreateGroup": (4, [bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
+    "CreateGroup": ([bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
     # group id, new group id, signature
-    "ChangeGroupID": (3, [int, int, bytes], [10, 10, None]),
+    "ChangeGroupID": ([int, int, bytes], [10, 10, None]),
     # group id, signature
-    "GroupIDInUse": (2, [int, bytes], [10, None]),
+    "GroupIDInUse": ([int, bytes], [10, None]),
     # group id
-    "NoSuchGroup": (1, [int], [10]),
-    "GroupNameDecryptionFailure": (1, [int], [10])
+    "NoSuchGroup": ([int], [10]),
+    "GroupNameDecryptionFailure": ([int], [10])
 }
 
 OUTGOING_MESSAGE_TYPES = {
     # message index, diffie hellman pub, diffie hellman sig
-    "NewMessage": (3, [int, int, bytes], [10, 16, None]),
+    "NewMessage": ([int, int, bytes], [10, 16, None]),
     # message index, diffie hellman pub, diffie hellman sig
-    "MessageAccept": (3, [int, int, bytes], [10, 16, None]),
+    "MessageAccept": ([int, int, bytes], [10, 16, None]),
     # message index, initialisation vector, message data
-    "MessageData": (3, [int, int, bytes], [10, 16, None]),
+    "MessageData": ([int, int, bytes], [10, 16, None]),
     # message index
-    "IndexInUse": (1, [int], [10]),
-    "MessageDecryptionFailure": (1, [int], [10]),
-    "InvalidSignature": (1, [int], [10]),
-    "NoSuchIndex": (1, [int], [10]),
-    "ResendAuthPacket": (1, [int], [10]),
+    "IndexInUse": ([int], [10]),
+    "MessageDecryptionFailure": ([int], [10]),
+    "InvalidSignature": ([int], [10]),
+    "NoSuchIndex": ([int], [10]),
+    "ResendAuthPacket": ([int], [10]),
     # request index, client id (server only)
-    "GetKey": (2, [int, str], [10, 'utf-8']),
+    "GetKey": ([int, str], [10, 'utf-8']),
     # client id, exponent, modulus (server only)
-    "PublicKeyMismatch": (3, [str, int, int], ['utf-8', 16, 16]),
+    "PublicKeyMismatch": ([str, int, int], ['utf-8', 16, 16]),
     # request index (server only)
-    "NoSuchKeyRequest": (1, [int], [10]),
+    "NoSuchKeyRequest": ([int], [10]),
     # message type
-    "UnknownMessageType": (1, [str], ['utf-8']),
-    "NotAllowed": (1, [str], ['utf-8']),
+    "UnknownMessageType": ([str], ['utf-8']),
+    "NotAllowed": ([str], ['utf-8']),
     # encrypted group name, signature, group id, members
-    "CreateGroup": (4, [bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
+    "CreateGroup": ([bytes, bytes, int, list], [None, None, 10, (str, 'utf-8')]),
     # group id, new id, signature
-    "ChangeGroupID": (3, [int, int, bytes], [10, 10, None]),
+    "ChangeGroupID": ([int, int, bytes], [10, 10, None]),
     # group id, signature
-    "GroupIDInUse": (2, [int, bytes], [10, None]),
+    "GroupIDInUse": ([int, bytes], [10, None]),
     # group id
-    "NoSuchGroup": (1, [int], [10]),
-    "GroupNameDecryptionFailure": (1, [int], 10)
+    "NoSuchGroup": ([int], [10]),
+    "GroupNameDecryptionFailure": ([int], 10)
 }
 
 class Client:
@@ -167,11 +169,16 @@ class Client:
         db = self._db_connect()
         client_id = client_id.strip().lower()
         if re.fullmatch('^[0-9a-f]{64}$', client_id):
+            if db.get_id(nickname):
+                raise NickNameInUseException(nickname)
+            if db.get_nickname(client_id):
+                raise UserAlreadyExistsException()
+
             db.set_nickname(client_id, nickname)
             db.close()
         else:
-            self._logger.log("Invalid ID Format", 1)
             db.close()
+            raise InvalidIDException()
 
     def rename_contact(self, old_nickname: str, new_nickname: str):
         """Rename the contact with the old nickname to have the new nickname.
@@ -300,7 +307,7 @@ class Client:
             "dh_private": dh_priv,
             "encryption_key": 0,
             "data": message.decode('latin1'),  # needs to be JSON serializable
-            "group": 0 
+            "group": 0
         }
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
@@ -316,12 +323,12 @@ class Client:
         db = self._db_connect()
         group = db.get_group_id(group_name)
         if group is None:
-            raise GroupNotFoundException(group_name) 
-        recipients = db.get_members(group)
+            raise GroupNotFoundException(group_name)
+        recipients = db.get_members(group_name)
+        recipients.remove(self.get_id())
 
+        db.insert_group_message(group, message, self.get_id())
         for recipient in recipients:
-            db.insert_message(recipient, message, True)
-            db.close()
             dh_priv = random.randrange(1, self._dhke_group[1])
             index = random.randrange(1, 2**64)
             while index in self._messages:
@@ -334,8 +341,9 @@ class Client:
                 "data": message.decode('latin1'),
                 "group": group
             }
-            message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
-            self._server.send(message)
+            self._logger.log(f"Group {group} message {message.decode('latin1')} -> {recipient}", 3)
+            constructed_message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
+            self._server.send(constructed_message)
 
     def create_group(self, name: str, *members: str):
         """Create a group of users which can be used to send group messages.
@@ -619,7 +627,7 @@ class Client:
 
         db = self._db_connect()
         group_name = db.get_group_name(group_id)
-        group_members = db.get_members(group_id)
+        group_members = db.get_members_by_id(group_id)
         if group_members:
             if self.get_id() == db.get_owner(group_id) and sender in group_members:
                 if not db.user_known(sender):

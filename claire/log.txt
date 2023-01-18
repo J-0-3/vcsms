@@ -1,0 +1,10 @@
+Mon Jan 16 14:56:50 2023|1|Creating group mygroup: id = 12509338027579723550, members = ['9f00b8cbffc5751d28c363310f193c73a47d4c74051061f80bd125c1580468be', '3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea']
+Mon Jan 16 14:58:41 2023|1|Creating group asg3hgahego3haoigsgoi3qighsaghwoahgoishgoihwoiahgoihwgoihasg: id = 8565892209639016777, members = ['3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea', 'ab9f11e2517ae069019bc2a8613df9c7af1bc87d4429fde4a06c00461a16d6cd']
+Mon Jan 16 14:59:11 2023|3|Group 12509338027579723550 message hello ! -> 9f00b8cbffc5751d28c363310f193c73a47d4c74051061f80bd125c1580468be
+Mon Jan 16 14:59:11 2023|3|Group 12509338027579723550 message hello ! -> 3b90a80f716cc9738b4ee899f55b27c6d2082ab9f8040db42de3fa362638b9ea
+Mon Jan 16 20:06:39 2023|3|Trying to close connection to server
+Mon Jan 16 20:06:39 2023|3|Able to close connection
+Mon Jan 16 20:06:39 2023|2|Closed connection to server
+Wed Jan 18 21:26:22 2023|3|Trying to close connection to server
+Wed Jan 18 21:26:22 2023|3|Able to close connection
+Wed Jan 18 21:26:22 2023|2|Closed connection to server

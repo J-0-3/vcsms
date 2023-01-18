@@ -13,14 +13,14 @@ from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
 
 INCOMING_MESSAGE_TYPES = {
-    "GetKey": (2, [int, str], [10, 'utf-8']),
-    "Quit": (0, [], []),
-    "NoSuchKeyRequest": (1, [int], [10])
+    "GetKey": ([int, str], [10, 'utf-8']),
+    "Quit": ([], []),
+    "NoSuchKeyRequest": ([int], [10])
 }
 
 OUTGOING_MESSAGE_TYPES = {
-    "KeyFound": (3, [int, int, int], [10, 16, 16]),
-    "KeyNotFound": (1, [int], [10])
+    "KeyFound": ([int, int, int], [10, 16, 16]),
+    "KeyNotFound": ([int], [10])
 }
 
 

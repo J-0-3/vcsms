@@ -10,8 +10,8 @@ class MessageParser:
     The message parser uses message schemas and a response map to interpret, construct and handle messages.
     
     The message schemas are split into incoming and outgoing messages (as some message types may be valid as responses to a server but not as requests from it.)
-    and are always of the form (argument count, [argument types], [type conversion information]). The argument count should define how many arguments are expected,
-    the argument types should be python types such as int, str, bytes, list etc and the type conversion information should be the integer base for integers, string encoding for strings,
+    and are always of the form ([argument types], [type conversion information]).
+    The argument types should be python types such as int, str, bytes, list etc and the type conversion information should be the integer base for integers, string encoding for strings,
     the item type for lists and None for bytes.
     
     The response map is a dictionary defining functions to execute when each message type is processed. These functions should always take in the client ID
@@ -24,8 +24,8 @@ class MessageParser:
 
     Messages always take the form ID:Type: followed by parameters separated by :.
     """
-    def __init__(self, incoming_message_types: dict[str, tuple[int, list[type], list]],
-                 outgoing_message_types: dict[str, tuple[int, list[type], list]], response_map: dict[str, Callable]):
+    def __init__(self, incoming_message_types: dict[str, tuple[list[type], list]],
+                 outgoing_message_types: dict[str, tuple[list[type], list]], response_map: dict[str, Callable]):
         """Initialise an instance of the MessageParser class.
 
         Args:
@@ -62,9 +62,9 @@ class MessageParser:
         else:
             return values
 
-        length, types, type_info = message_schema
-        if len(values) < length:
-            raise ParameterCountException(values, length, message_type)
+        types, type_info = message_schema
+        if len(values) < len(types):
+            raise ParameterCountException(values, len(types), message_type)
         casted = []
         for i,v in enumerate(values):
             try:
@@ -156,12 +156,12 @@ class MessageParser:
         """
         if message_type in self._outgoing:
             message_schema = self._outgoing[message_type]
-            length, types, type_info = message_schema
-            if len(values) != length:
-                raise ParameterCountException(values, length, message_type)
+            types, type_info = message_schema
+            if len(values) != len(types):
+                raise ParameterCountException(values, len(types), message_type)
 
             values_as_bytes = []
-            for i in range(length):
+            for i,_ in enumerate(values):
                 if not isinstance(values[i], types[i]):
                     raise ParameterWrongTypeException(values[i], types[i], message_type)
 

@@ -32,11 +32,11 @@ class Client_DB:
     def setup(self):
         """Create the database if it has not already been created"""
 
-        self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text unique, nickname blob unique)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS messages (id text, content blob, outgoing integer, timestamp integer, iv text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text unique, name blob unique, owner_id text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text primary key unique, nickname blob unique)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS messages (id integer primary key autoincrement, sender_id text, content blob, outgoing integer, timestamp integer, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text primary key unique, name blob unique, owner_id text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (group_id text, sender_id text, content blob, timestamp integer, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (id integer primary key autoincrement, group_id text, sender_id text, content blob, timestamp integer, iv text)")
         self._db.commit()
 
     def get_group_name(self, group_id: int) -> str | None:
@@ -101,10 +101,10 @@ class Client_DB:
             encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
             self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
             self._cached_groupname_plaintexts[encrypted_group_name] = group_name
-        cursor.execute(("SELECT client_id"
-                       "FROM group_members"
-                       "INNER JOIN groups"
-                       "ON groups.id = group_members.id"
+        cursor.execute(("SELECT client_id "
+                       "FROM group_members "
+                       "INNER JOIN groups "
+                       "ON groups.id = group_members.id "
                        "WHERE groups.name = ?"), (encrypted_group_name, ))
         
         results = cursor.fetchall()
@@ -120,7 +120,7 @@ class Client_DB:
             list[str]: A list of all the members of the group (empty if the group does not exist)
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT client_id FROM group_members WHERE id=?", (group_id))
+        cursor.execute("SELECT client_id FROM group_members WHERE id=?", (hex(group_id), ))
         results = cursor.fetchall()
         return [result[0] for result in results]
 
@@ -137,11 +137,11 @@ class Client_DB:
         encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
         self._cached_groupname_plaintexts[encrypted_group_name] = group_name
         self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
-        self._db.execute("INSERT INTO groups VALUES (?, ?, ?)", (encrypted_group_name, hex(group_id), owner_id))
+        self._db.execute("INSERT INTO groups (name, id, owner_id) VALUES (?, ?, ?)", (encrypted_group_name, hex(group_id), owner_id))
         for member in members:
-            self._db.execute("INSERT INTO group_members VALUES (?, ?)", (hex(group_id), member))
+            self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), member))
         if owner_id not in members:
-            self._db.execute("INSERT INTO group_members VALUES (?, ?)", (hex(group_id), owner_id))
+            self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), owner_id))
         self._db.commit()
 
 
@@ -221,7 +221,7 @@ class Client_DB:
                 raw message bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT content, outgoing, iv FROM messages WHERE id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
+        cursor.execute("SELECT content, outgoing, iv FROM messages WHERE sender_id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
         messages = []
         for m in cursor.fetchall():
             ciphertext, sent, aes_iv = m
@@ -255,7 +255,7 @@ class Client_DB:
         cursor = self._db.cursor()
         cursor.execute(("SELECT messages.content, messages.outgoing, messages.iv "
                        "FROM messages "
-                       "INNER JOIN nicknames ON messages.id = nicknames.id "
+                       "INNER JOIN nicknames ON messages.sender_id = nicknames.id "
                        "WHERE nicknames.nickname=? "
                        "ORDER BY messages.timestamp "
                        "DESC "
@@ -357,7 +357,7 @@ class Client_DB:
         aes_iv = random.randrange(0, 2**128)
         message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
         self._cached_message_plaintexts[(message_encrypted, aes_iv)] = message
-        self._db.execute(("INSERT INTO messages (id, content, outgoing, timestamp, iv) "
+        self._db.execute(("INSERT INTO messages (sender_id, content, outgoing, timestamp, iv) "
                           "VALUES (?, ?, ?, strftime('%s','now'), ?)"),
                          (client_id, message_encrypted, int(sent), hex(aes_iv)))
         self._db.commit()
@@ -373,12 +373,13 @@ class Client_DB:
         aes_iv = random.randrange(0, 2**128)
         message_encrypted = aes256.encrypt_cbc(message, self._encryption_key, aes_iv)
         self._cached_message_plaintexts[(message_encrypted, aes_iv)] = message
-        self._db.execute("INSERT INTO group_messages VALUES (?, ?, ?, strftime('%s','now'), ?)",
+        self._db.execute("INSERT INTO group_messages (group_id, sender_id, content, timestamp, iv) VALUES (?, ?, ?, strftime('%s','now'), ?)",
                          (hex(group_id), sender, message_encrypted, hex(aes_iv)))
         self._db.commit()
         
     def set_nickname(self, client_id: str, nickname: str):
         """Set the nickname for a given client id.
+        The client id and nickname should be unique.
 
         Args:
             id (str): The client ID to attach the nickname to.
@@ -387,7 +388,7 @@ class Client_DB:
         nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
         self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
         self._cached_nickname_plaintexts[nickname_encrypted] = nickname
-        self._db.execute("REPLACE INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
+        self._db.execute("INSERT INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
         self._db.commit()
 
     def change_nickname(self, old_nickname: str, new_nickname: str):

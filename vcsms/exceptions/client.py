@@ -10,6 +10,7 @@ class ClientException(Exception):
             message (str): The error message to raise.
         """
         super().__init__(f"Client raised an exception: {message}.")
+        self.message = message
 
 
 class UserNotFoundException(ClientException):
@@ -37,11 +38,26 @@ class GroupNameInUseException(ClientException):
         """Instantiate a GroupNameInUseException
 
         Args:
-            name (str): The name of the group 
+            name (str): The name of the group
         """
-        super().__init__(f"Group {name} cannot be created as the name is already in use.")
+        super().__init__(f"Group {name} already exists.")
 
 class GroupNotFoundException(ClientException):
     """Raised when a group is referenced which does not exist."""
     def __init__(self, name: str):
         super().__init__(f"Group {name} does not exist")
+
+class NickNameInUseException(ClientException):
+    """Raised when the nickname for a user is already being used"""
+    def __init__(self, nickname: str):
+        super().__init__(f"Nickname {nickname} is already in use")
+
+class UserAlreadyExistsException(ClientException):
+    """Raised when the client ID for a user is already registered"""
+    def __init__(self, client_id: str = ""):
+        super().__init__(f"User {client_id} already exists.")
+
+class InvalidIDException(ClientException):
+    """Raised when an invalid client ID is supplied"""
+    def __init__(self, client_id: str = ""):
+        super().__init__("ID {client_id} is malformed")
