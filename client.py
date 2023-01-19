@@ -11,29 +11,60 @@ from vcsms.exceptions.client import IncorrectMasterKeyException, ClientException
 
 class ScrollableTextBox:
     def __init__(self, y: int, x: int, height: int, width: int):
-        self.y = y
-        self.x = x
-        self.height = height
-        self.cur_scroll = 0
-        self.lines = []
-        self.width = width
-        self.pad = curses.newpad(height, width)
+        self._y = y
+        self._x = x
+        self._height = height
+        self.scroll = 0
+        self._num_lines = 0
+        self._width = width
+        self.pad = curses.newpad(30000, width)
+        self._cur_line = 0
     
+    @property
+    def num_lines(self): return self._num_lines
+
+    @property
+    def y(self): return self._y
+
+    @property
+    def x(self): return self._x
+
+    @property
+    def height(self): return self._height
+
+    @property
+    def width(self): return self._width
+
     def display(self):
-        top_line = max(0, len(self.lines) - y - self.cur_scroll)
-        self.pad.refresh(top_line, 0, y, x, y + height, x + width)
+        top_line = max(0, self._num_lines - self._height - self.scroll)
+        self.pad.refresh(top_line, 0, self._y, self._x, self._y + self._height, self._x + self._width)
 
     def add_string(self, string: str):
-        while string > self.width:
-            self.lines.append(string[:self.width])
-            string = string[self.width:]
-        self.lines.append(string)
+        lines = string.split('\n')
+        for line in lines:
+            while len(line) > self._width - 1:
+                self.pad.addstr(self._cur_line, 1, line[:self._width - 1])
+                self._num_lines += 1
+                self._cur_line += 1
+                line = line[self._width - 1:]
+            self.pad.addstr(self._cur_line, 1, line)
+            self._cur_line += 1
+            self._num_lines += 1
 
-    def scroll_down(amount: int):
-        self.cur_scroll = max(0, self.cur_scroll - amount)
+    def scroll_down(self, amount: int):
+        self.scroll = max(0, self.scroll - amount)
     
-    def scroll_up(amount: int):
-        self.cur_scroll = max(self.cur_scroll + amount, len(self.lines) - y)
+    def scroll_up(self, amount: int):
+        self.scroll = min(self.scroll + amount, self.get_max_scroll())
+
+    def get_max_scroll(self) -> int:
+        return self._num_lines - self._height
+
+    def clear(self):
+        self.pad.clear()
+        self.scroll = 0
+        self._cur_line = 0
+        self._num_lines = 0
 
 class Application:
     """A curses based client application for VCSMS"""
@@ -52,12 +83,8 @@ class Application:
         self._left_panel = None
         self._main_panel = None
         self._left_panel_bottom_bar = None
-        self._cur_scroll_position = 0
         self._new_message = {}
-        self._max_scroll_position = 0
-        self._message_buffer_oldest = 0
         self._running = False
-        self._message_buffer = []
         self.__focused_user = ""
         self._focused_user_index = 0
         self._panel_sizes = {}
@@ -81,14 +108,9 @@ class Application:
         self.__focused_user = user
         if user:
             self._new_message[user] = False
-            self._max_scroll_position = self._client.message_count(user) - (curses.LINES - 8)
-        else:
-            self._max_scroll_position = 0
-        self._cur_scroll_position = 0
-        self._message_buffer = []
-        self._message_buffer_oldest = 0
+
         self._draw_left_panel()
-        self._draw_main_panel()
+        self._draw_main_panel(True)
         if bottom_bar_redraw:
             self._draw_bottom_bar()
 
@@ -114,11 +136,11 @@ class Application:
         else:
             instructions = ""
             if self._focused_user:
-                instructions += "(n)ew message (r)ename (d)elete "
-            instructions += "(a)dd contact (q)uit "
-            if self._cur_scroll_position > 0:
+                instructions += "(n)ew msg (r)ename (d)elete (c)reate grp "
+            instructions += "(a)dd (q)uit "
+            if self._main_panel.scroll > 0:
                 instructions += "j \u2193 "
-            if self._cur_scroll_position < self._max_scroll_position:
+            if self._main_panel.scroll < self._main_panel.get_max_scroll():
                 instructions += "k \u2191"
             self._bottom_bar.addstr(1, 1, instructions)
         self._bottom_bar.border()
@@ -153,29 +175,15 @@ class Application:
                 display_name = f"[{display_name}]"
             if is_group:
                 display_name = f"%{display_name}"
-            if contact_name in self._new_message and self._new_message[contact_name] and self._focused_user != contact_name:
-                display_name = f"*{display_name}"
+            if contact_name in self._new_message and self._new_message[contact_name]:
+                if contact_name == self._focused_user:
+                    self._new_message[contact_name] = False
+                else:
+                    display_name = f"*{display_name}"
             self._left_panel.addstr(i + 2, 1, display_name)
 
         self._left_panel.border()
         self._left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
-
-    def _get_message_lines(self, name: str, count: int):
-        """Get the last *count* messages in ascending time order propertly formatted and split into lines
-        """
-        messages = self._client.get_messages(name, count)[::-1]
-        lines = []
-        max_width = self._panel_sizes["main"][1]
-        for m, s in messages:
-            if s == self._id:
-                display_format = f"TO {name}: {m.decode('utf-8')}"
-            else:
-                display_format = f"FROM {s}: {m.decode('utf-8')}"
-            while len(display_format) > max_width:
-                lines.append(display_format[:max_width])
-                display_format = display_format[max_width:]
-            lines.append(display_format)
-        return lines
 
     def _create_group(self):
         """Prompt the user to create a group chat."""
@@ -200,23 +208,19 @@ class Application:
         if not self._focused_user:
             self._focused_user = name
 
-    def _draw_main_panel(self):
+    def _draw_main_panel(self, reload_messages = False):
         """Draw the main panel containing messages from the
         currently focused user.
         """
-        self._main_panel.clear()
-        num_to_display = curses.LINES - 8
-        if self._cur_scroll_position + num_to_display > self._message_buffer_oldest:
-            num_to_load = self._cur_scroll_position + num_to_display + 20
-            self._message_buffer = self._get_message_lines(self._focused_user, num_to_load)
-            self._message_buffer_oldest = len(self._message_buffer)
-
-        end = self._cur_scroll_position + num_to_display
-        messages_to_show = self._message_buffer[self._cur_scroll_position:end]
-
-        for i, message in enumerate(messages_to_show):
-            self._main_panel.addstr(i, 1, message)
-        self._main_panel.refresh(0, 0, 4, 26, curses.LINES-4, curses.COLS-1)
+        if reload_messages:
+            self._main_panel.clear()
+            self._message_buffer = self._client.get_messages(self._focused_user)[::-1]
+            for message, sender in self._message_buffer:
+                if sender == self._id:
+                    self._main_panel.add_string(f"TO {self._focused_user}: {message.decode('utf-8')}")
+                else:
+                    self._main_panel.add_string(f"FROM {sender}: {message.decode('utf-8')}")
+        self._main_panel.display()
 
     def _ask_input(self, prompt: str, height: int = 1) -> str:
         """Ask for input given a specific prompt.
@@ -262,17 +266,14 @@ class Application:
         currently focused user.
         """
         if self._focused_user:
-            message = self._ask_input("Message", 3)
+            message = self._ask_input("Message")
             if message:
                 try:
                     self._client.send(self._focused_user, message.encode())
                 except ClientException as e:
                     self._flash_error(e.message)
                     return
-                self._max_scroll_position += 1
-                self._message_buffer_oldest = 0
-                self._cur_scroll_position = 0
-            self._draw_main_panel()
+            self._draw_main_panel(True)
 
     def _rename_contact(self):
         """Prompt the user to enter a new name for the currently focused user.
@@ -305,7 +306,7 @@ class Application:
         self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
         self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
         self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
-        self._main_panel = curses.newpad(curses.LINES - 6, curses.COLS - 26)
+        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 26)
         self._panel_sizes = {
             "main": (curses.LINES - 6, curses.COLS - 26),
             "left": (curses.LINES - 3, 26),
@@ -346,15 +347,15 @@ class Application:
             self._client.quit()
             raise Exception("Window too small. Resize your terminal.")
         self._init_ui()
-        self._max_scroll_position = self._client.message_count(self._focused_user) - (curses.LINES - 8)
         if self._focused_user:
+            self._draw_main_panel(True)
             self._draw_bottom_bar()
         else:
+            self._draw_main_panel()
             self._draw_bottom_bar("(a)dd contact, (q)uit")
         self._draw_top_bar()
         self._draw_left_panel()
         self._draw_left_panel_bottom_bar()
-        self._draw_main_panel()
         self._running = True
         while self._running:
             if self._client.new_message():
@@ -362,14 +363,11 @@ class Application:
                 contact_name = group or sender
                 self._new_message[contact_name] = True
                 if self._focused_user == contact_name:
-                    self._max_scroll_position += 1
-                    self._message_buffer_oldest = 0
-                    self._cur_scroll_position = 0
-                    self._draw_main_panel()
+                    self._draw_main_panel(True)
                 if (contact_name, bool(group)) not in self._contacts:
                     self._contacts.append((contact_name, bool(group)))
                 if not self._focused_user:
-                    self._focused_user = chat_name
+                    self._focused_user = contact_name
                 self._draw_left_panel()
             self._handle_input()
 
@@ -398,14 +396,12 @@ class Application:
                 self._cycle_focused_user(-1)
             case 'j':
                 if self._focused_user:
-                    if self._cur_scroll_position > 0:
-                        self._cur_scroll_position -= 1
+                    self._main_panel.scroll_down(1)
                     self._draw_main_panel()
                     self._draw_bottom_bar()
             case 'k':
                 if self._focused_user:
-                    if self._cur_scroll_position < self._max_scroll_position:
-                        self._cur_scroll_position += 1
+                    self._main_panel.scroll_up(1)
                     self._draw_main_panel()
                     self._draw_bottom_bar()
             case 'c':

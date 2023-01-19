@@ -27,7 +27,7 @@ def verify(data: bytes, signature: bytes, pub_key: tuple[int, int]) -> bool:
 
     Args:
         data (bytes): The data that has been signed.
-        signature (bytes): The signature to verify. 
+        signature (bytes): The signature to verify.
         pub_key (tuple[int, int]): The public key of the sender in the form (exponent, modulus).
 
     Returns:

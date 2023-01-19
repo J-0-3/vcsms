@@ -209,7 +209,7 @@ class Client_DB:
             return None
         return result[0]
 
-    def get_messages_by_id(self, client_id: str, count: int) -> list[tuple[bytes, bool]]:
+    def get_messages_by_id(self, client_id: str, count: int = 0) -> list[tuple[bytes, bool]]:
         """Get the last *count* messages to/from a specified client ID in descending time order.
 
         Args:
@@ -221,7 +221,8 @@ class Client_DB:
                 raw message bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT content, outgoing, iv FROM messages WHERE sender_id=? ORDER BY timestamp DESC LIMIT ?", (client_id, count))
+        cursor.execute(f"SELECT content, outgoing, iv FROM messages WHERE sender_id=? ORDER BY timestamp DESC{' LIMIT ?' if count else ''}",
+                       (client_id, count) if count else (client_id, ))
         messages = []
         for m in cursor.fetchall():
             ciphertext, sent, aes_iv = m
@@ -235,12 +236,12 @@ class Client_DB:
                 messages.append((plaintext, sent))
         return messages
 
-    def get_messages_by_nickname(self, nickname: str, count: int) -> list[tuple[bytes, bool]]:
+    def get_messages_by_nickname(self, nickname: str, count: int = 0) -> list[tuple[bytes, bool]]:
         """Get the last *count* messages to/from a specified nickname in descending time order.
 
         Args:
             nickname (str): The contact nickname to lookup
-            count (int): The number of messages to return
+            count (int): The number of messages to return (0 if unlimited)
 
         Returns:
             list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the
@@ -258,8 +259,8 @@ class Client_DB:
                        "INNER JOIN nicknames ON messages.sender_id = nicknames.id "
                        "WHERE nicknames.nickname=? "
                        "ORDER BY messages.timestamp "
-                       "DESC "
-                       "LIMIT ?"), (nickname_encrypted, count))
+                       "DESC"
+                       f"{' LIMIT ?' if count else ''}"), (nickname_encrypted, count) if count else (nickname_encrypted, ))
 
         messages = []
         for m in cursor.fetchall():
@@ -274,7 +275,7 @@ class Client_DB:
                 messages.append((plaintext, sent))
         return messages
 
-    def get_group_messages(self, group_name: str, count: int) -> list[tuple[bytes, str]]:
+    def get_group_messages(self, group_name: str, count: int = 0) -> list[tuple[bytes, str]]:
         """Get all messages to/from a given group
 
         Args:
@@ -299,8 +300,9 @@ class Client_DB:
                         "LEFT JOIN nicknames "
                         "ON group_messages.sender_id = nicknames.id "
                         "WHERE groups.name=? ORDER BY timestamp "
-                        "DESC "
-                        "LIMIT ?"), (encrypted_group_name, count))
+                        "DESC"
+                        f"{' LIMIT ?' if count else ''}"),
+                       (encrypted_group_name, count) if count else (encrypted_group_name, ))
         results = cursor.fetchall()
         
         messages = []
@@ -472,7 +474,7 @@ class Client_DB:
             encrypted_nickname = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
             self._cached_nickname_ciphertexts[nickname] = encrypted_nickname
             self._cached_nickname_plaintexts[encrypted_nickname] = nickname
-        self._db.execute("DELETE FROM messages WHERE id IN (SELECT id FROM nicknames WHERE nickname=?)", (encrypted_nickname, ))
+        self._db.execute("DELETE FROM messages WHERE sender_id IN (SELECT id FROM nicknames WHERE nickname=?)", (encrypted_nickname, ))
         self._db.execute("DELETE FROM nicknames WHERE nickname=?", (encrypted_nickname, ))
         self._db.commit()
 
@@ -482,7 +484,7 @@ class Client_DB:
         Args:
             client_id (str): The ID of the contact to delete
         """
-        self._db.execute("DELETE FROM messages WHERE id=?", (client_id, ))
+        self._db.execute("DELETE FROM messages WHERE sender_id=?", (client_id, ))
         self._db.execute("DELETE FROM nicknames WHERE id=?", (client_id, ))
         self._db.commit()
 

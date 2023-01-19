@@ -219,28 +219,28 @@ class Client:
         db.close()
         return contacts
 
-    def get_messages(self, name: str, count: int) -> list[tuple[bytes, str]]:
+    def get_messages(self, name: str, count: int = 0) -> list[tuple[bytes, str]]:
         """Get the last *count* messages to/from the specified user or group.
 
         Args:
             name (str): The user/group name to lookup.
-            count (int): The (maximum) number of messages to/from the specified contact to return.
+            count (int): The (maximum) number of messages to/from the specified contact to return. (0 if no limit)
 
         Returns:
             list[tuple[bytes, bool]]: The last *count* messages to/from the client in time order
                 (newest first) in the format (message, sender) where message is the raw message
-                and sender is the user who sent the message. 
+                and sender is the user who sent the message.
         """
         db = self._db_connect()
         if db.get_group_id(name):
-            messages = db.get_group_messages(name, count) 
+            messages = db.get_group_messages(name, count)
         else:
             messages_in_single_user_form = db.get_messages_by_nickname(name, count)
             messages = []
             my_id = self.get_id()
             for message in messages_in_single_user_form:
                 data, outgoing = message
-                messages.append((data, my_id if outgoing else name)) 
+                messages.append((data, my_id if outgoing else name))
         
         db.close()
         return messages
