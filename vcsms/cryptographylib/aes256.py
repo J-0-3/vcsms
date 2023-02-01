@@ -397,7 +397,7 @@ def round_constant(n: int):
     Returns:
         int: The calculated 32 bit round constant
     """
-    return (0x02**(n-1)) << 24
+    return (2**(n-1)) << 24
 
 
 def sub_word(word: int):
@@ -440,15 +440,15 @@ def expand_key(key: int) -> list:
     for word in key_words:
         schedule.append(word)
     for i in range(8, 60):
-        temp = schedule[i - 1]
+        prev = schedule[i - 1]
         if i % 8 == 0:
-            temp = rotate_word(temp)
-            temp = sub_word(temp)
+            prev = rotate_word(prev)
+            prev = sub_word(prev)
             rcon = round_constant(int(i/8))
-            temp ^= rcon
+            prev ^= rcon
         elif (i - 4) % 8 == 0:
-            temp = sub_word(temp)
-        schedule.append(temp ^ schedule[i - 8])
+            prev = sub_word(prev)
+        schedule.append(prev ^ schedule[i - 8])
     return schedule
 
 

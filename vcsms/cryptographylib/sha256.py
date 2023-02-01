@@ -107,6 +107,13 @@ def hash(message: bytes) -> int:
         1] * 2 ** 192 + H[0] * 2 ** 224  # concatenate final hash values
     return resultant_hash
 
+def hex_digest(val: bytes) -> str:
+    """Calculate the hash of the value and return it as a 64 character hex string"""
+    hex_hash = hex(hash(val))[2:]
+    while len(hex_hash) < 64:
+        hex_hash = "0" + hex_hash
+    return hex_hash
+
 
 if __name__ == "__main__":
     import sys

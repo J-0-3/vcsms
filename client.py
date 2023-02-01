@@ -306,7 +306,7 @@ class Application:
         self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
         self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
         self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
-        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 26)
+        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 27)
         self._panel_sizes = {
             "main": (curses.LINES - 6, curses.COLS - 26),
             "left": (curses.LINES - 3, 26),
