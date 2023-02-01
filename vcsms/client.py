@@ -22,6 +22,7 @@ from .exceptions.client import GroupNameInUseException
 from .exceptions.client import NickNameInUseException
 from .exceptions.client import UserAlreadyExistsException
 from .exceptions.client import GroupNotFoundException
+from .exceptions.client import InvalidIDException
 from . import keys
 from . import signing
 from . import client_db
@@ -203,7 +204,10 @@ class Client:
             nickname (str): The nickname of the contact to delete.
         """
         db = self._db_connect()
-        db.delete_contact_by_nickname(nickname)
+        if db.get_id(nickname):
+            db.delete_contact_by_nickname(nickname)
+        elif db.get_group_id(nickname):
+            db.delete_group_by_group_name(nickname)
         db.close()
 
     def get_contacts(self) -> list[tuple[str, bool]]:
