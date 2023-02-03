@@ -106,7 +106,7 @@ class NonStreamSocket:
         """
         return not self._queue.empty()
 
-    def listen(self):
+    def run(self):
         """Start the socket listening for incoming data. This must be called before any data can be received from the socket."""
         t_in = threading.Thread(target=self._in_thread, args=())
         t_life = threading.Thread(target=self._checklife_thread, args=())

@@ -427,5 +427,8 @@ if __name__ == "__main__":
     except IncorrectMasterKeyException:
         print("Master password incorrect. Please try again.")
         quit()
+    except ClientException:
+        print(f"Client failed to connect to server. See log.txt for more information.")
+        quit()
     application = Application(vcsms_client)
     curses.wrapper(application.run)

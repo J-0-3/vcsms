@@ -6,6 +6,7 @@ class ConnectionException(Exception):
     """
     def __init__(self, message: str):
         super().__init__(f"Failure connecting to server: {message}")
+        self.message = message
 
 
 class MalformedPacketException(ConnectionException):
@@ -35,3 +36,11 @@ class SignatureVerifyFailureException(ConnectionException):
     """
     def __init__(self, signature: bytes):
         super().__init__(f"Could not verify signature: {signature}")
+
+class ServerConnectionAbort(ConnectionException):
+    def __init__(self, reason: str):
+        super().__init__(f"Server aborted connection. Reason: {reason}")
+
+class KeyConfirmationFailureException(ConnectionException):
+    def __init__(self):
+        super().__init__(f"Failed to decrypt confirmation packet")

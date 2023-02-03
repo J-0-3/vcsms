@@ -9,7 +9,7 @@ from .non_stream_socket import NonStreamSocket
 from .logger import Logger
 from .cryptographylib import dhke, sha256, utils, aes256
 from .cryptographylib.exceptions import DecryptionFailureException
-from .exceptions.server_connection import MalformedPacketException, PublicKeyIdMismatchException, SignatureVerifyFailureException
+from .exceptions.server_connection import *
 
 
 class ServerConnection:
@@ -58,6 +58,8 @@ class ServerConnection:
             MalformedPacketException: The server sent a message of an invalid form.
             PublicKeyIdMismatchException: The server provided a public key that doesn't match the specified fingerprint.
             SignatureVerifyFailureException: The server provided a badly signed diffie hellman public key.
+            ServerConnectionAbort: The server aborted the connection
+            KeyConfirmationFailureException: The established shared key failed confirmation
         """
         pub_exp = hex(pub_key[0])[2:].encode()
         pub_mod = hex(pub_key[1])[2:].encode()
@@ -69,7 +71,7 @@ class ServerConnection:
             self._socket.close()
             raise MalformedPacketException()
         if keys.fingerprint(self._public_key) != self._fp:
-            self._socket.send(b"PubKeyIdMismatch")
+            self._socket.send(b"PubKeyFpMismatch")
             self._socket.close()
             raise PublicKeyIdMismatchException(keys.fingerprint(self._public_key), self._fp)
 
@@ -79,8 +81,15 @@ class ServerConnection:
         dhke_priv = random.randrange(1, dhke_group[1])
         dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, priv_key, dhke_group)
 
+        server_auth_packet = self._socket.recv()
+        if server_auth_packet == b"MalformedPacket":
+            self._socket.close()
+            raise ServerConnectionAbort("Malformed identity packet")
+        elif server_auth_packet == b"PubKeyIdMismatch":
+            self._socket.close()
+            raise ServerConnectionAbort("Public key fingerprint does not match client ID")
         try:
-            s_dhke_pub, s_dhke_pub_sig = self._socket.recv().split(b':')
+            s_dhke_pub, s_dhke_pub_sig = server_auth_packet.split(b':')
         except ValueError:
             self._socket.send(b"MalformedPacket")
             self._socket.close()
@@ -92,9 +101,38 @@ class ServerConnection:
             raise SignatureVerifyFailureException(s_dhke_pub_sig)
 
         self._socket.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
-
         shared_key = dhke.calculate_shared_key(dhke_priv, int(s_dhke_pub, 16), dhke_group)
         self._encryption_key = sha256.hash(utils.i_to_b(shared_key))
+
+        encrypted_confirmation = self._socket.recv()
+        if encrypted_confirmation == b"MalformedPacket":
+            self._socket.close()
+            raise ServerConnectionAbort("Malformed authentication packet")
+        elif encrypted_confirmation == b"BadSignature":
+            self._socket.close()
+            raise ServerConnectionAbort("Incorrectly signed diffie hellman public key")
+        elif encrypted_confirmation == b"IDCollision":
+            self._socket.close()
+            raise ServerConnectionAbort("Public key collision for client ID")
+        try:
+            iv, ciphertext = encrypted_confirmation.split(b':')
+            iv = int(iv, 16)
+            ciphertext = bytes.fromhex(ciphertext.decode('utf-8'))
+        except ValueError:
+            self._socket.send(b"MalformedPacket")
+            self._socket.close()
+            raise MalformedPacketException()
+        try:
+            plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv)
+        except DecryptionFailureException:
+            self._socket.send("CouldNotDecrypt")
+            self._socket.close()
+            raise KeyConfirmationFailureException()
+        self._socket.send(plaintext)
+        if self._socket.recv() != b"OK":
+            self._socket.close()
+            raise ServerConnectionAbort("Failed challenge-response confirmation for shared key")
+         
 
     def connect(self, pub_key: tuple[int, int], priv_key: tuple[int, int]):
         """Begin a connection to the server.
@@ -103,8 +141,11 @@ class ServerConnection:
             pub_key (tuple[int, int]): The client public key to send to the server.
             priv_key (tuple[int, int]): The client private key to use when signing data.
         """
-        self._socket.connect(self._ip, self._port)
-        self._socket.listen()
+        try:
+            self._socket.connect(self._ip, self._port)
+        except ConnectionRefusedError:
+            raise ConnectionException("Server refused connection")
+        self._socket.run()
         self._handshake(pub_key, priv_key, dhke.group14_2048)
         self._connected = True
         t_in = threading.Thread(target=self._in_thread, args=())

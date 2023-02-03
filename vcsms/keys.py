@@ -72,7 +72,7 @@ def fingerprint(key: tuple[int, int]) -> str:
         str: The SHA256 fingerprint of the key in hex format. 
     """
     hash = sha256.hash(hex(key[0])[2:].encode() + hex(key[1])[2:].encode())
-    hex_fp = hex(hash)[2:]
-    while len(hex_fp) < 64:
+    hex_fp = hex(hash)[2:26]
+    while len(hex_fp) < 24:
         hex_fp = "0" + hex_fp
     return hex_fp

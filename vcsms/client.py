@@ -7,6 +7,7 @@ import re
 import time
 import json
 from json.decoder import JSONDecodeError
+from sqlite3 import IntegrityError as sqliteIntegrityError
 from queue import Queue
 from typing import Callable
 
@@ -16,13 +17,8 @@ from .cryptographylib.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
-from .exceptions.client import UserNotFoundException
-from .exceptions.client import IncorrectMasterKeyException
-from .exceptions.client import GroupNameInUseException
-from .exceptions.client import NickNameInUseException
-from .exceptions.client import UserAlreadyExistsException
-from .exceptions.client import GroupNotFoundException
-from .exceptions.client import InvalidIDException
+from .exceptions.server_connection import ConnectionException
+from .exceptions.client import *
 from . import keys
 from . import signing
 from . import client_db
@@ -169,16 +165,19 @@ class Client:
         """
         db = self._db_connect()
         client_id = client_id.strip().lower()
-        if re.fullmatch('^[0-9a-f]{64}$', client_id):
+        if re.fullmatch('^[0-9a-f]{24}$', client_id):
             if db.get_id(nickname):
+                self._logger.log(f"Nickname {nickname} is already in use", 1)
                 raise NickNameInUseException(nickname)
             if db.get_nickname(client_id):
+                self._logger.log(f"User {client_id} already exists", 1)
                 raise UserAlreadyExistsException()
 
             db.set_nickname(client_id, nickname)
             db.close()
         else:
             db.close()
+            self._logger.log(f"{client_id} does not look like a valid client id.", 1)
             raise InvalidIDException()
 
     def rename_contact(self, old_nickname: str, new_nickname: str):
@@ -194,7 +193,11 @@ class Client:
             sqlite3.IntegrityError: The new nickname is already in use
         """
         db = self._db_connect()
-        db.change_nickname(old_nickname, new_nickname)
+        try:
+            db.change_nickname(old_nickname, new_nickname)
+        except sqliteIntegrityError:
+            self._logger.log(f"Nickname {new_nickname} is already in use", 1)
+            raise NickNameInUseException(new_nickname)
         db.close()
 
     def delete_contact(self, nickname: str):
@@ -293,10 +296,11 @@ class Client:
             if db.get_group_id(recipient):
                 self._group_send(recipient, message)
                 return
-            if re.fullmatch('^[a-fA-F0-9]{64}$', recipient):
+            if re.fullmatch('^[a-fA-F0-9]{24}$', recipient):
                 db.set_nickname(recipient, recipient)
                 recipient_id = recipient
             else:
+                self._logger.log(f"User {recipient} not found.")
                 raise UserNotFoundException(recipient)
         db.insert_message(recipient_id, message, True)
         db.close()
@@ -327,6 +331,7 @@ class Client:
         db = self._db_connect()
         group = db.get_group_id(group_name)
         if group is None:
+            self._logger.log(f"Group {group_name} not found", 1)
             raise GroupNotFoundException(group_name)
         recipients = db.get_members(group_name)
         recipients.remove(self.get_id())
@@ -361,9 +366,10 @@ class Client:
         for member in members:
             member_id = db.get_id(member)
             if member_id is None:
-                if re.fullmatch("^[a-fA-F0-9]{64}$", member_id):
+                if re.fullmatch("^[a-fA-F0-9]{24}$", member):
                     member_id = member
                 else:
+                    self._logger.log(f"User {member} not found.", 1)
                     raise UserNotFoundException(member)
             member_ids.append(member_id)
 
@@ -372,6 +378,7 @@ class Client:
             group_id = random.randrange(1, 2**64)
 
         if db.get_group_id(name) or db.get_id(name):
+            self._logger.log(f"Group name {name} already in use.", 1)
             raise GroupNameInUseException(name)
         self._logger.log(f"Creating group {name}: id = {group_id}, members = {member_ids}", 1)
 
@@ -406,6 +413,7 @@ class Client:
         os.makedirs(os.path.join(self._app_dir, "keys"), exist_ok=True)
         if os.path.exists(os.path.join(self._app_dir, "keytest")):
             if not self._check_master_key():
+                self._logger.log("Incorrect master key attempt.", 0)
                 raise IncorrectMasterKeyException()
         else:
             self._create_master_key_test()
@@ -435,7 +443,11 @@ class Client:
             self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._encryption_key)
 
         self._server = ServerConnection(self._ip, self._port, self._fingerprint, self._logger)
-        self._server.connect(self._pub, self._priv)
+        try:
+            self._server.connect(self._pub, self._priv)
+        except ConnectionException as e:
+            self._logger.log(str(e), 0)
+            raise ConnectionFailureException from e
         self._running = True
         self._load_saved_in_process_messages()
         t_incoming = threading.Thread(target=self._incoming_thread, args=())

@@ -11,6 +11,7 @@ from .cryptographylib import dhke, sha256, aes256, utils
 from .non_stream_socket import NonStreamSocket
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
+from .exceptions.server import IDCollisionException
 
 INCOMING_MESSAGE_TYPES = {
     "GetKey": ([int, str], [10, 'utf-8']),
@@ -69,7 +70,7 @@ class Server:
             conn, addr = self._sock.accept()
             self._logger.log(f"New connection from: {addr}", 2)
             ns_sock = NonStreamSocket(conn)
-            ns_sock.listen()
+            ns_sock.run()
             t_connect = threading.Thread(target=self._handshake, args=(ns_sock,))
             t_connect.start()
 
@@ -95,18 +96,26 @@ class Server:
         pub_mod = hex(self._pub[1])[2:].encode()
         client.send(pub_exp + b':' + pub_mod)
         identity_packet = client.recv()
+        if identity_packet == b"MalformedPacket":
+            self._logger.log("Connection failure. Client reported a malformed identity packet.", 1)
+            client.close()
+            return
+        elif identity_packet == b"PubKeyFpMismatch":
+            self._logger.log("Connection failure. Client reported a fingerprint mismatch.", 1)
+            client.close()
+            return
         try:
             c_id, c_exp, c_mod = identity_packet.split(b':')
             c_id = c_id.decode()
         except ValueError:
             self._logger.log("Connection failure. Malformed identity packet.", 1)
-            client.send(b"MalformedIdentityPacket")
+            client.send(b"MalformedPacket")
             client.close()
             return
-        self._logger.log(f"Client ID is {c_id}", 2)
+        self._logger.log(f"Client authenticating as {c_id}", 2)
         client_pubkey = (int(c_exp, 16), int(c_mod, 16))
         if keys.fingerprint(client_pubkey) != c_id:
-            self._logger.log(f"Connection failure. Public key validation failed for {c_id}", 1)
+            self._logger.log(f"Connection failure. Public key hash mismatch for {c_id}", 1)
             client.send(b"PubKeyIdMismatch")
             client.close()
             return
@@ -115,7 +124,22 @@ class Server:
         dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, self._priv, self._dhke_group)
         client.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
 
-        c_dhke_pub, c_dhke_pub_sig = client.recv().split(b':')
+        pubkey_auth_packet = client.recv()
+        if pubkey_auth_packet == b"BadSignature":
+            self._logger.log(f"Connection failure. Client reported an incorrect signature.", 1)
+            client.close()
+            return
+        elif pubkey_auth_packet == b"MalformedPacket":
+            self._logger.log(f"Connection failure. Client reported a malformed DH signature authentication packet.", 1)
+            client.close()
+            return
+        try:
+            c_dhke_pub, c_dhke_pub_sig = pubkey_auth_packet.split(b':')
+        except ValueError:
+            self._logger.log(f"Connection failure. Malformed DH signature authentication packet.", 1)
+            client.send(b"MalformedPacket")
+            client.close()
+            return
         if not signing.verify(c_dhke_pub, c_dhke_pub_sig, client_pubkey):
             self._logger.log(f"Connection failure. Bad signature from {c_id}", 1)
             client.send(b"BadSignature")
@@ -124,6 +148,35 @@ class Server:
 
         shared_key = dhke.calculate_shared_key(dhke_priv, int(c_dhke_pub, 16), self._dhke_group)
         encryption_key = sha256.hash(utils.i_to_b(shared_key))
+        db = self._db_connect()
+        try:
+            db.user_login(c_id, client_pubkey)
+        except IDCollisionException:
+            self._logger.log(f"Connection Failure. Client ID {c_id} provided a key which collides with another.", 1)
+            db.close()
+            client.send(b"IDCollision")
+            client.close()
+            return
+        self._logger.log(f"User {c_id} successfully authenticated", 1)
+        enc_iv = random.randrange(1, 2**128)
+        random_data = random.randbytes(32)
+        encrypted_confirmation = aes256.encrypt_cbc(random_data, encryption_key, enc_iv)
+        client.send(hex(enc_iv)[2:].encode('utf-8') + b':' + encrypted_confirmation.hex().encode('utf-8'))
+        client_confirm = client.recv()
+        if client_confirm == b"MalformedPacket":
+            self._logger.log("Connection Failure. Client reported a malformed confirmation packet.")
+            client.close()
+            return
+        if client_confirm == b"CouldNotDecrypt":
+            self._logger.log("Connection Failure. Client was unable to decrypt confirmation challenge.", 1)
+            client.close()
+            return
+        if client_confirm != random_data:
+            self._logger.log("Connection Failure. Client did not confirm handshake success.", 1)
+            client.send(b"Incorrect")
+            client.close()
+            return
+        client.send(b"OK")
         if c_id in self._client_outboxes:
             outbox = self._client_outboxes[c_id]
         else:
@@ -131,14 +184,11 @@ class Server:
             self._client_outboxes[c_id] = outbox
 
         self._sockets[c_id] = client
-        db = self._db_connect()
-        db.user_login(c_id, client_pubkey)
-        db.close()
-        self._logger.log(f"User {c_id} successfully authenticated", 1)
         t_in = threading.Thread(target=self._in_thread, args=(client, encryption_key, c_id))
         t_out = threading.Thread(target=self._out_thread, args=(client, outbox, encryption_key))
         t_in.start()
         t_out.start()
+        db.close()
 
     # thread methods
     def _in_thread(self, client: NonStreamSocket, encryption_key: int, client_id: str):

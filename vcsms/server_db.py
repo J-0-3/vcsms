@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from . import keys
+from .exceptions.server import IDCollisionException
 
 
 class Server_DB:
@@ -40,12 +41,14 @@ class Server_DB:
             id (str): The client ID to login. 
             pubkey (tuple): The client's public key.
         """
+        if self.user_known(id) and self.get_pubkey(id) != pubkey:
+                raise IDCollisionException(id)
         if not self.user_known(id):
             keys.write_key(pubkey, os.path.join(self._pubkeys, id))
-
         self._db.execute("insert into connection_log values(?, datetime('now', 'localtime'))", (id, ))
         self._db.execute("replace into logged_in values(?, 1)", (id, ))
         self._db.commit()
+        return True
 
     def user_logout(self, id: str):
         """Register a given client ID as logged out.
