@@ -44,3 +44,7 @@ class ServerConnectionAbort(ConnectionException):
 class KeyConfirmationFailureException(ConnectionException):
     def __init__(self):
         super().__init__(f"Failed to decrypt confirmation packet")
+
+class NetworkError(ConnectionException):
+    def __init__(self, reason: Exception):
+        super().__init__(f"Network connection failed. Reason: {str(reason)}")

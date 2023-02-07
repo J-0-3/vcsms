@@ -70,7 +70,7 @@ class ServerConnection:
             self._socket.send(b"MalformedPacket")
             self._socket.close()
             raise MalformedPacketException()
-        if keys.fingerprint(self._public_key) != self._fp:
+        if keys.fingerprint(self._public_key, 64) != self._fp:
             self._socket.send(b"PubKeyFpMismatch")
             self._socket.close()
             raise PublicKeyIdMismatchException(keys.fingerprint(self._public_key), self._fp)
@@ -128,11 +128,14 @@ class ServerConnection:
             self._socket.send("CouldNotDecrypt")
             self._socket.close()
             raise KeyConfirmationFailureException()
-        self._socket.send(plaintext)
-        if self._socket.recv() != b"OK":
+        self._socket.send(plaintext.hex().encode('utf-8'))
+        response = self._socket.recv()
+        if response == b"MalformedPacket":
+            self._socket.close()
+            raise ServerConnectionAbort("Malformed challenge response")
+        if response != b"OK":
             self._socket.close()
             raise ServerConnectionAbort("Failed challenge-response confirmation for shared key")
-         
 
     def connect(self, pub_key: tuple[int, int], priv_key: tuple[int, int]):
         """Begin a connection to the server.
@@ -143,8 +146,8 @@ class ServerConnection:
         """
         try:
             self._socket.connect(self._ip, self._port)
-        except ConnectionRefusedError:
-            raise ConnectionException("Server refused connection")
+        except OSError as e:
+            raise NetworkError(e)
         self._socket.run()
         self._handshake(pub_key, priv_key, dhke.group14_2048)
         self._connected = True

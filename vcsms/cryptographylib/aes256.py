@@ -1,4 +1,5 @@
 import math
+import random
 from .utils import get_msb, i_to_b
 from .exceptions import DecryptionFailureException
 
@@ -31,10 +32,12 @@ def invert_sbox(s_box: list) -> list:
         list: 2D list containing the inverted substitution box
     """
 
-    inverted_s_box = [[0 for column in s_box] for row in s_box]
-    for row_index, row in enumerate(s_box):
-        for col_index, _ in enumerate(row):
-            inverted_s_box[s_box[row_index][col_index] >> 4][s_box[row_index][col_index] % 2**4] = (row_index << 4) | col_index
+    inverted_s_box = [[0] * 16 for _ in range(16)]
+    for row_i, row in enumerate(s_box):
+        for col_i, byte in enumerate(row):
+            upper = byte >> 4
+            lower = byte % 2**4 
+            inverted_s_box[upper][lower] = (row_i << 4) | col_i
     return inverted_s_box
 
 
@@ -199,11 +202,12 @@ def transpose_matrix(m: list) -> list:
 
 
 def sbox_lookup(b: int, sbox: list) -> int:
-    """Lookup a byte in a given substitution box and return the resultant element.
+    """Lookup a byte in a given substitution box and
+    return the resultant element.
 
     Args:
         b (int): The byte to lookup
-        sbox (list): The 16x16 sbox in which to lookup the byte
+        sbox (list): The sbox to use
 
     Returns:
         int: The corresponding sbox element
@@ -214,22 +218,27 @@ def sbox_lookup(b: int, sbox: list) -> int:
 
 
 def sub_bytes(state: list, inverse: bool = False) -> list:
-    """Substitute all bytes in the state matrix with their corresponding elements in the
+    """Substitute all bytes in the state matrix
+    with their corresponding elements in the
     AES s-box or inverse s-box.
 
     Args:
         state (list): The current AES block state matrix.
-        inverse (bool, optional): Whether to use the inverse s-box. Defaults to False.
+        inverse (bool, optional): Whether to use the inverse s-box. 
+            Defaults to False.
 
     Returns:
-        list: _description_
+        list: The new state matrix
     """
 
     subbed_state = []
     for row in state:
         subbed = []
-        for col in row:
-            subbed.append(sbox_lookup(col, inverse_s_box if inverse else s_box))
+        for byte in row:
+            if inverse:
+                subbed.append(sbox_lookup(byte, inverse_s_box))
+            else:
+                subbed.append(sbox_lookup(byte, s_box))
         subbed_state.append(subbed)
     return subbed_state
 
@@ -259,20 +268,23 @@ def shift_rows(state: list, inverse: bool = False) -> list:
 
 
 def mix_columns(state: list, inverse: bool = False) -> list:
-    """Multiply the state matrix by another 4x4 matrix formed from a galois field polynomial repeated
-    for each row of the matrix with a cyclic right shift of the row index + 1. To encipher the state the
-    polynomial used is 0xb 0xd 0x9 0xe and to decipher it is 0x3 0x1 0x1 0x2.
+    """Multiply the state matrix with another 4x4 matrix 
+    formed from a galois field polynomial incrementally 
+    cyclically shifted right.
 
     Args:
         state (list): The current 4x4 state matrix
-        inverse (bool, optional): Whether to invert the operation. Defaults to False.
+        inverse (bool, optional): Whether to invert the operation. (Default False)
 
     Returns:
         list: The resultant state matrix.
     """
 
     columns = transpose_matrix(state)
-    multiplication_matrix = shift_rows([[0x0e, 0x0b, 0x0d, 0x09]]*4 if inverse else [[0x02, 0x03, 0x01, 0x01]]*4, True)
+    if inverse:
+        multiplication_matrix = shift_rows([[0x0e, 0x0b, 0x0d, 0x09]]*4, True)
+    else:
+        multiplication_matrix = shift_rows([[0x02, 0x03, 0x01, 0x01]]*4, True)
 
     mixed_columns = []
     for c in range(4):
@@ -280,7 +292,7 @@ def mix_columns(state: list, inverse: bool = False) -> list:
         for i in range(4):
             val = 0
             for j in range(4):
-                val ^= multiply_lookup[columns[c][j]][multiplication_matrix[i][j]]  # matrix vector multiplication but with weird GF arithmetic
+                val ^= multiply_lookup[columns[c][j]][multiplication_matrix[i][j]]
             col[i] = val
         mixed_columns.append(col)
 
@@ -288,11 +300,13 @@ def mix_columns(state: list, inverse: bool = False) -> list:
 
 
 def add_round_key(state: list, round_key: list) -> list:
-    """Combine the state matrix with a round key matrix by XORing together the corresponding elements.
+    """Combine the state matrix with a round key matrix by
+    XORing together the corresponding elements.
 
     Args:
         state (list): The current 4x4 state matrix.
-        round_key (list): The 4x4 round key matrix for the current cipher round.
+        round_key (list): The 4x4 round key matrix
+            for the current cipher round.
 
     Returns:
         list: The state ^ round key
@@ -530,7 +544,43 @@ def decrypt_block(key_schedule: list, block: int) -> int:
     return matrix_to_int(state)
 
 
-def encrypt_ecb(data: bytes, key: int) -> bytes:
+def pad(data: bytes, max_pad_bytes: int = 2048) -> bytes:
+    """Add a random number of random padding bytes before
+    and after the data.
+
+    Args:
+        data (bytes): The data to pad
+        max_pad_bytes (int): The maximum number of padding bytes to add. (Default 2048)
+
+    Returns:
+        bytes: The padded data
+    """
+    num_pad_bytes_before = random.randrange(0, max_pad_bytes // 2)
+    padded_data = num_pad_bytes_before.to_bytes(2)
+    num_pad_bytes_after = random.randrange(0, max_pad_bytes // 2)
+    padded_data += num_pad_bytes_after.to_bytes(2)
+    padding_bytes_before = random.randbytes(num_pad_bytes_before)
+    padded_data += padding_bytes_before
+    padded_data += data
+    padding_bytes_after = random.randbytes(num_pad_bytes_after)
+    padded_data += padding_bytes_after
+    return padded_data
+
+def unpad(data: bytes) -> bytes:
+    """Strip padding bytes from the start and end of
+    some padded data.
+
+    Args:
+        data (bytes): The padded data.
+
+    Returns:
+        bytes: The original data with padding removed.
+    """
+    num_before = int.from_bytes(data[:2])
+    num_after = int.from_bytes(data[2:4])
+    return data[num_before + 4:-num_after]
+
+def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:
     """Encrypt a bytestring using AES in Electronic Code Book mode.
     This means that the data is split into blocks and each block is
     encrypted independently using the same key.
@@ -540,11 +590,16 @@ def encrypt_ecb(data: bytes, key: int) -> bytes:
     Args:
         data (bytes): The plaintext bytestring to encrypt
         key (int): The 256 bit encryption key
+        raw (bool): Do not pad or add any additional information to the plaintext.
+            You definitely do not want to do this.
 
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes('AES' + data, 'big')
+    if not raw:
+        data_as_int = int.from_bytes(b'AES' + pad(data), 'big')
+    else:
+        data_as_int = int.from_bytes(data, 'big')
     message_blocks = split_blocks(data_as_int)
     key_schedule = expand_key(key)
     ciphertext_blocks = [encrypt_block(key_schedule, block) for block in message_blocks]
@@ -556,12 +611,14 @@ def encrypt_ecb(data: bytes, key: int) -> bytes:
     return i_to_b(ciphertext)
 
 
-def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
+def decrypt_ecb(ciphertext: bytes, key: int, raw: bool = False) -> bytes:
     """Decrypt a bytestring using AES in Electronic Code Book mode.
 
     Args:
-        ciphertext (bytes): The ciphertext bytestring to decrypt
-        key (int): The 256 bit encryption key
+        ciphertext (bytes): The ciphertext bytestring to decrypt.
+        key (int): The 256 bit encryption key.
+        raw (bool): The data did not have any formatting or padding applied
+            prior to encryption. (Default: False)
 
     Returns:
         bytes: The decrypted plaintext bytestring
@@ -578,11 +635,15 @@ def decrypt_ecb(ciphertext: bytes, key: int) -> bytes:
 
     plaintext = i_to_b(message)
     if plaintext[0:3] == b'AES':
-        return plaintext[3:]
+        try:
+            unpadded = unpad(plaintext[3:])
+            return unpadded
+        except:
+            raise DecryptionFailureException(key)
     raise DecryptionFailureException(key)
 
 
-def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
+def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
     This means that the output of the encryption of each plaintext block
     is XORed with the next plaintext block before it is encrypted which
@@ -593,16 +654,22 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
     Args:
         data (bytes): The plaintext bytestring to encrypt
         key (int): The 256 bit encryption key
-        initialisation_vector (int): The 128 bit initialisation vector to XOR with the first block. It is highly recommended this is provided.
+        iv (int): The 128 bit initialisation vector to XOR with the first block. 
+            It is highly recommended this is provided. (Default 0)
+        raw (bool): Do not pad or add any additional information to the plaintext.
+            You definitely do not want to do this. (Default False)
 
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    data_as_int = int.from_bytes(b'AES' + data, 'big')
+    if not raw:
+        data_as_int = int.from_bytes(b'AES' + pad(data), 'big')
+    else:
+        data_as_int = int.from_bytes(data, 'big')
     message_blocks = split_blocks(data_as_int)  # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
-    prev_output = initialisation_vector
+    prev_output = iv
     for block in message_blocks:
         xored_block = block ^ prev_output  # xor with previous block output
         ciphertext_block = encrypt_block(key_schedule, xored_block)
@@ -610,22 +677,24 @@ def encrypt_cbc(data: bytes, key: int, initialisation_vector: int = 0) -> bytes:
         ciphertext_blocks.append(ciphertext_block)
 
     # combine blocks by repeated left shift and OR
-    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant (big endian)
+    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant
     ciphertext = 0
     for block in ciphertext_blocks:
         ciphertext |= (block << shift)
-        shift -= 128                           # 128 bit long blocks
+        shift -= 128
 
     return i_to_b(ciphertext)
 
 
-def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> bytes:
+def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False) -> bytes:
     """Decrypt a bytestring using AES in Cipher Block Chaining mode.
 
     Args:
         ciphertext (bytes): The encrypted ciphertext bytestring
         key (int): The 256 bit encryption key
-        initialisation_vector (int): The 128 bit initialisation vector used when the data was encrypted.
+        iv (int): The 128 bit initialisation vector used when the data was encrypted.
+        raw (bool): The data did not have any padding or formatting applied before encryption.
+            (Default: False).
 
     Returns:
         bytes: The decrypted plaintext bytestring
@@ -636,7 +705,7 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
     message_blocks = []
     for i, block in enumerate(ciphertext_blocks):
         if i == 0:
-            prev_output = initialisation_vector
+            prev_output = iv
         else:
             prev_output = ciphertext_blocks[i-1]
 
@@ -651,6 +720,10 @@ def decrypt_cbc(ciphertext: bytes, key: int, initialisation_vector: int) -> byte
 
     plaintext = i_to_b(message)
     if plaintext[:3] == b'AES':
-        return plaintext[3:]
+        try:
+            unpadded = unpad(plaintext[3:])
+            return unpadded
+        except:
+            raise DecryptionFailureException(key)
     raise DecryptionFailureException(key)
 

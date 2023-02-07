@@ -415,8 +415,10 @@ class Client:
             if not self._check_master_key():
                 self._logger.log("Incorrect master key attempt.", 0)
                 raise IncorrectMasterKeyException()
+            self._logger.log("Successful login", 2)  
         else:
-            self._create_master_key_test()
+            self._logger.log("Generating master key challenge", 2)
+        self._create_master_key_test()
 
         if os.path.exists(os.path.join(self._app_dir, "nickname.iv")):
             with open(os.path.join(self._app_dir, "nickname.iv"), 'r', encoding='utf-8') as f:
@@ -439,15 +441,19 @@ class Client:
         try:
             self._pub = keys.load_key(public_key_path)
             self._priv = keys.load_key(private_key_path, self._encryption_key)
+            self._logger.log("Successfully loaded RSA keypair", 2)
         except FileNotFoundError:
+            self._logger.log("Generating RSA keypair", 2)
             self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._encryption_key)
 
         self._server = ServerConnection(self._ip, self._port, self._fingerprint, self._logger)
+        self._logger.log("Connecting to server.", 2)
         try:
             self._server.connect(self._pub, self._priv)
         except ConnectionException as e:
             self._logger.log(str(e), 0)
             raise ConnectionFailureException from e
+        self._logger.log("Connection successful.", 2)
         self._running = True
         self._load_saved_in_process_messages()
         t_incoming = threading.Thread(target=self._incoming_thread, args=())
@@ -455,6 +461,7 @@ class Client:
 
     def quit(self):
         """Close the connection with the server and shutdown the client program."""
+        self._logger.log("Shutting down client program", 2)
         self._server.send(self._message_parser.construct_message("0", "Quit"))
         self._running = False
         self._server.close()
@@ -546,8 +553,11 @@ class Client:
         plaintext = bytes.fromhex(plaintext)
         aes_iv = int(aes_iv, 16)
         ciphertext = bytes.fromhex(ciphertext)
-        if ciphertext == aes256.encrypt_cbc(plaintext, self._encryption_key, aes_iv):
-            return True
+        try:
+            if plaintext == aes256.decrypt_cbc(ciphertext, self._encryption_key, aes_iv):
+                return True
+        except DecryptionFailureException:
+            return False
         return False
 
     # methods for threads
@@ -600,11 +610,12 @@ class Client:
         try:
             group_name = rsa.decrypt(encrypted_group_name, self._priv[0], self._priv[1])
         except DecryptionFailureException:
+            self._logger.log(f"Unable to decrypt group name in creation request from {sender}.", 2)
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
         signature_data = (group_name + hex(group_id) + ''.join(members)
                           + self.get_id()).encode('utf-8')
-        self._logger.log(f"Group creation from {sender}: name = {group_name}, id = {group_id}, members = {members}", 1)
+        self._logger.log(f"Group creation attempt from {sender}: name = {group_name}, id = {group_id}, members = {members}", 1)
         db = self._db_connect()
         if not db.user_known(sender):
             self._request_key(sender)
@@ -614,6 +625,7 @@ class Client:
             if db.get_group_name(group_id):
                 response_signature_data = f"{group_id}{group_name}{sender}".encode('utf-8')
                 response_signature = signing.sign(response_signature_data, self._priv)
+                self._logger.log(f"ID {group_id} is already in use. Reporting to creator.", 3)
                 return "GroupIDInUse", (group_id, response_signature)
             postfix = 1
             while db.get_group_id(group_name):
@@ -621,10 +633,11 @@ class Client:
                 postfix += 1
             db.create_group(group_name, group_id, sender, members)
             db.close()
+            self._logger.log(f"Group {group_name}:{group_id} successfully created.")
             return None
-        else:
-            db.close()
-            return "InvalidSignature", (group_id, )
+        db.close()
+        self._logger.log(f"Invalid signature in group creation request.", 2)
+        return "InvalidSignature", (group_id, )
 
     def _handler_group_id_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
         """Handler function for the GroupIDInUse message type.
@@ -666,9 +679,13 @@ class Client:
                             self._server.send(message)
                     response_signature_data = f"{group_name}{group_id}{new_group_id}{sender}".encode('utf-8')
                     response_signature = signing.sign(response_signature_data, self._priv)
+                    self._logger.log(f"Requesting members of group {group_id} change their group IDs in response to ID in use error.", 3)
                     return "ChangeGroupID", (group_id, new_group_id, response_signature)
+                self._logger.log(f"Invalid signature for ID in use error.", 2)
                 return "InvalidSignature", (group_id, )
+            self._logger.log(f"ID in use error from user who is not part of the group, or for a group I am not the owner of.", 2)
             return "NotAllowed", ("GroupIDInUse", )
+        self._logger.log(f"ID in use error for non-existent group {group_id}.", 2)
         return "NoSuchGroup", (group_id, )
 
     def _handler_change_group_id(self, sender: str, values: list) -> None | tuple[str, tuple]:
@@ -698,11 +715,16 @@ class Client:
                     if db.get_group_name(new_group_id):
                         response_signature_data = f"{group_name}{new_group_id}{self.get_id()}".encode('utf-8')
                         response_signature = signing.sign(response_signature_data, self._priv)
+                        self._logger.log(f"{sender} tried to change a group ID to one already in use.", 3)
                         return "GroupIDInUse", (new_group_id, response_signature)
                     db.change_group_id(old_group_id, new_group_id) 
+                    self._logger.log(f"Changed group ID {old_group_id} to {new_group_id}", 3)
                     return None
+                self._logger.log(f"Invalid new group info signature from {sender}.", 2)
                 return "InvalidSignature", (old_group_id)
+            self._logger.log(f"{sender} tried to change the ID of a non-existent group.", 2)
             return "NoSuchGroup", (old_group_id, )
+        self._logger.log(f"Unauthorised group ID change request.", 2)
         return "NotAllowed", ("ChangeGroupID")
 
     def _handler_key_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
@@ -728,9 +750,13 @@ class Client:
                     db = self._db_connect()
                     db.save_key(client_id, (exponent, modulus))
                     db.close()
+                    self._logger.log(f"Key received from server for {client_id}.", 3)
                     return None
+                self._logger.log(f"Client's public key fingerprint did not match the expected client ID.", 1)
                 return "PublicKeyMismatch", (client_id, exponent, modulus)
+            self._logger.log(f"Received response to non-existent key request {request_index}", 2)
             return "NoSuchKeyRequest", (request_index, )
+        self._logger.log(f"Received unauthorised key request response.", 2)
         return "NotAllowed", ("KeyFound", )
 
     def _handler_key_not_found(self, sender: str, values: list) -> None | tuple[str, tuple]:
@@ -749,10 +775,12 @@ class Client:
             if req_index in self._key_requests:
                 client_id = self._key_requests[req_index]
                 self._logger.log(
-                    f"Server could not locate key for {client_id}", 2)
+                    f"Server could not locate key for {client_id}", 1)
                 self._key_requests.pop(req_index)
                 return None
+            self._logger.log(f"Received response to non-existent key request {req_index}.", 2)
             return "NoSuchKeyRequest", (req_index, )
+        self._logger.log(f"Received unauthorised key request response.", 2)
         return "NotAllowed", ("KeyNotFound", )
 
     def _handler_new_message(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -773,14 +801,14 @@ class Client:
         message_index, sender_dh_pub, sender_dh_sig = values
         if message_index in self._messages:
             self._logger.log(
-                f"Message from {sender} requested use of already-in-use index {message_index}", 3)
+                f"Message from {sender} requested use of already-in-use index {message_index}", 2)
             return "IndexInUse", (message_index, )
 
         db = self._db_connect()
         if not db.user_known(sender):
             db.close()
             self._request_key(sender)
-            self._logger.log(f"Message from unknown user {sender}", 3)
+            self._logger.log(f"Message from unknown user {sender}. Requesting key.", 3)
             return "ResendAuthPacket", (message_index, )
 
         signature_data = hex(sender_dh_pub)[2:].encode(
@@ -788,7 +816,7 @@ class Client:
         if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
             db.close()
             self._logger.log(
-                f"Invalid Diffie Hellman signature from {sender}", 2)
+                f"Invalid Diffie Hellman signature from {sender}", 1)
             return "InvalidSignature", (message_index, )
 
         db.close()
@@ -834,13 +862,13 @@ class Client:
             if not db.user_known(sender):
                 self._request_key(sender)
                 db.close()
-                self._logger.log(f"Message to unknown user {sender}", 2)
+                self._logger.log(f"Message to unknown user {sender}. Requesting key.", 3)
                 return "ResendAuthPacket", (message_index, )
 
             signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
             if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
                 db.close()
-                self._logger.log("Invalid Diffie Hellman public key signature from {sender}", 2)
+                self._logger.log(f"Invalid public key signature from {sender}", 1)
                 return "InvalidSignature", (message_index, )
             db.close()
 
@@ -856,6 +884,7 @@ class Client:
             ciphertext = aes256.encrypt_cbc(plaintext, encryption_key, aes_iv)
             self._messages.pop(message_index)
             return "MessageData", (message_index, aes_iv, ciphertext)
+        self._logger.log(f"{sender} sent message accept for message addressed to another user.", 2)
         return "NotAllowed", ("MessageAccept", )
 
     def _handler_message_data(self, sender: str, values: list) -> tuple[str, tuple] | None:
@@ -887,12 +916,14 @@ class Client:
             try:
                 message_data = json.loads(plaintext)
             except JSONDecodeError:
+                self._logger.log(f"Malformed message data from {sender}", 1)
                 return "MessageMalformed", (message_index, )
             
             try:
                 group = message_data['group']
                 data = message_data['data'].encode('latin1')
             except KeyError:
+                self._logger.log(f"Malformed message data from {sender}", 1)
                 return "MessageMalformed", (message_index, )
                 
             db = self._db_connect()
@@ -911,6 +942,7 @@ class Client:
             db.close()
             self._messages.pop(message_index)
             return None
+        self._logger.log(f"{sender} attempted to send message data for message from other user.", 2)
         return "NotAllowed", ("MessageData", )
 
     def _handler_index_in_use(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -934,7 +966,9 @@ class Client:
             self._messages[new_id] = message
             dh_private = message["dh_private"]
             dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self._priv, self._dhke_group, new_id)
+            self._logger.log(f"Switching message ID {message_index} to {new_id}", 3)
             return "NewMessage", (new_id, dh_public, dh_signature)
+        self._logger.log(f"{sender} reported index in use for message with other user", 2)
         return "NotAllowed", ("IndexInUse", )
 
     def _handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
@@ -958,6 +992,7 @@ class Client:
             if message["encryption_key"]:
                 return "MessageAccept", (message_index, dh_public, dh_signature)
             return "NewMessage", (message_index, dh_public, dh_signature)
+        self._logger.log(f"{sender} is not authorised to act on message {message_index}", 2)
         return "NotAllowed", ("ResentAuthPacket", )
 
     def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:

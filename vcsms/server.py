@@ -171,6 +171,13 @@ class Server:
             self._logger.log("Connection Failure. Client was unable to decrypt confirmation challenge.", 1)
             client.close()
             return
+        try:
+            client_confirm = bytes.fromhex(client_confirm.decode('utf-8'))
+        except ValueError:
+            self._logger.log("Connection Failure. Malformed challenge response.", 1)
+            client.send(b"MalformedPacket")
+            client.close()
+            return
         if client_confirm != random_data:
             self._logger.log("Connection Failure. Client did not confirm handshake success.", 1)
             client.send(b"Incorrect")

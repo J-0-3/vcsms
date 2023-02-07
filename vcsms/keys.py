@@ -62,17 +62,21 @@ def load_key(path: str, encryption_key: int = 0) -> tuple[int, int]:
     return key
 
 
-def fingerprint(key: tuple[int, int]) -> str:
+def fingerprint(key: tuple[int, int], fp_length: int = 24) -> str:
     """Calculate a SHA256 fingerprint of a given RSA key.
 
     Args:
         key (tuple[int, int]): The RSA key in the form (exponent, modulus)  
+        fp_length (int): The number of characters to truncate the fingerprint to. 
+            (max 64) (Default 24).
 
     Returns:
         str: The SHA256 fingerprint of the key in hex format. 
     """
+    if fp_length > 64 or fp_length <= 1:
+        raise ValueError(f"Fingerprint length must not be greater than 64 or less than 1. ({fp_length}) provided.")
     hash = sha256.hash(hex(key[0])[2:].encode() + hex(key[1])[2:].encode())
-    hex_fp = hex(hash)[2:26]
-    while len(hex_fp) < 24:
+    hex_fp = hex(hash)[2:fp_length + 2]
+    while len(hex_fp) < fp_length:
         hex_fp = "0" + hex_fp
     return hex_fp

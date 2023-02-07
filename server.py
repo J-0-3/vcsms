@@ -13,13 +13,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=str, help="The directory in which to store all the server's files")
     parser.add_argument("-o", "--config-out", type=str, help="A location to output the server's connection file to")
+    parser.add_argument("-i", "--interface", type=str, help="The IP address of the network interface to run on. (Default 127.0.0.1)", default="127.0.0.1")
+    parser.add_argument("-p", "--port", type=int, help="The port for the service to listen on. (Default 6000)", default=6000)
     args = parser.parse_args()
     server_directory = args.directory
     key_directory = os.path.join(server_directory, "keys")
     os.makedirs(key_directory, exist_ok=True)
     public_key_path = os.path.join(server_directory, "server.pub")
     private_key_path = os.path.join(server_directory, "server.priv")
-    config_path = os.path.join(server_directory, "config_path")
     log_path = os.path.join(server_directory, "log.txt")
     database_path = os.path.join(server_directory, "server.db")
 
@@ -34,22 +35,17 @@ if __name__ == "__main__":
         print("Private key password incorrect. Try again.")
         quit()
 
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    else:
-        config = {
-            "ip": "127.0.0.1",
-            "port": 6000
-        }
-
     if args.config_out:
         with open(args.config_out, 'w', encoding='utf-8') as f:
             json.dump({
-                "port": config["port"],
-                "fingerprint": keys.fingerprint(pub)
+                "ip": "localhost",
+                "port": args.port,
+                "fingerprint": keys.fingerprint(pub, 64)
             }, f)
+        print(f"Config file created at: {os.path.abspath(args.config_out)}.")
+        print("Edit it to reflect your publically facing IP.")
 
     logger = Logger(5, log_path)
-    server = Server(config["ip"], config["port"], (pub, priv), database_path, key_directory, logger)
+    server = Server(args.interface, args.port, (pub, priv), database_path, key_directory, logger)
+    print(f"Running server on {args.interface}:{args.port}...")
     server.run()

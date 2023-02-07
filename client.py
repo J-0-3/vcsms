@@ -409,7 +409,6 @@ class Application:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("ip", type=str, help="The ip address of the server to connect to")
     parser.add_argument("config", type=str, help="The server's .vcsms config file")
     parser.add_argument("-d", "--directory", type=str, default="vcsms", help="Where to store application-generated files")
     parser.add_argument("-p", "--password", type=str, help="The application master password")
@@ -418,10 +417,10 @@ if __name__ == "__main__":
         serverconf = json.load(conf)
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
     if args.password:
-        vcsms_client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
+        vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
     else:
         password = input("Enter master password: ")
-        vcsms_client = Client(args.ip, serverconf["port"], serverconf["fingerprint"], args.directory, password, logger)
+        vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, password, logger)
     try:
         vcsms_client.run()
     except IncorrectMasterKeyException:
