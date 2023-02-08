@@ -4,7 +4,7 @@ import sqlite3
 import os
 import random
 from . import keys
-from .cryptographylib import aes256
+from .cryptography import aes256
 
 
 class Client_DB:
