@@ -11,9 +11,9 @@ from sqlite3 import IntegrityError as sqliteIntegrityError
 from queue import Queue
 from typing import Callable
 
-from .cryptographylib import dhke, sha256, aes256, rsa
-from .cryptographylib.utils import i_to_b
-from .cryptographylib.exceptions import DecryptionFailureException
+from .cryptography import dhke, sha256, aes256, rsa
+from .cryptography.utils import i_to_b
+from .cryptography.exceptions import DecryptionFailureException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
