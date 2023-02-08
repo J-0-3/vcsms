@@ -15,13 +15,12 @@ class ScrollableTextBox:
         self._x = x
         self._height = height
         self.scroll = 0
-        self._num_lines = 0
         self._width = width
+        self._line_buf = []
         self.pad = curses.newpad(30000, width)
-        self._cur_line = 0
     
     @property
-    def num_lines(self): return self._num_lines
+    def num_lines(self): return len(self._line_buf)
 
     @property
     def y(self): return self._y
@@ -36,20 +35,19 @@ class ScrollableTextBox:
     def width(self): return self._width
 
     def display(self):
-        top_line = max(0, self._num_lines - self._height - self.scroll)
+        top_line = max(0, self.num_lines - self._height - self.scroll)
+        self.pad.clear()
+        for i, v in enumerate(self._line_buf):
+            self.pad.addstr(i, 1, v)
         self.pad.refresh(top_line, 0, self._y, self._x, self._y + self._height, self._x + self._width)
 
     def add_string(self, string: str):
         lines = string.split('\n')
         for line in lines:
             while len(line) > self._width - 1:
-                self.pad.addstr(self._cur_line, 1, line[:self._width - 1])
-                self._num_lines += 1
-                self._cur_line += 1
+                self._line_buf.append(line[:self._width - 1])
                 line = line[self._width - 1:]
-            self.pad.addstr(self._cur_line, 1, line)
-            self._cur_line += 1
-            self._num_lines += 1
+            self._line_buf.append(line)
 
     def scroll_down(self, amount: int):
         self.scroll = max(0, self.scroll - amount)
@@ -58,31 +56,25 @@ class ScrollableTextBox:
         self.scroll = min(self.scroll + amount, self.get_max_scroll())
 
     def get_max_scroll(self) -> int:
-        return self._num_lines - self._height
+        return len(self._line_buf) - self._height
 
     def clear(self):
         self.pad.clear()
         self.scroll = 0
-        self._cur_line = 0
-        self._num_lines = 0
+        self._line_buf.clear()
 
 class Application:
     """A curses based client application for VCSMS"""
-    def __init__(self, client: Client):
+    def __init__(self, stdscr: curses.window, client: Client):
         """Instantiate the application
 
         Args:
             client (Client): An instance of vcsms.client.
                 Provides the actual client functionality.
         """
+        self._stdscr = stdscr
         self._client = client
         self._id = client.get_id()
-        self._stdscr = None
-        self._top_bar = None
-        self._bottom_bar = None
-        self._left_panel = None
-        self._main_panel = None
-        self._left_panel_bottom_bar = None
         self._new_message = {}
         self._running = False
         self.__focused_user = ""
@@ -91,6 +83,21 @@ class Application:
         self._contacts = client.get_contacts()
         if len(self._contacts) > 0:
             self.__focused_user = self._contacts[0][0]
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
+        self._left_panel = curses.newpad(curses.LINES - 3, 26)
+        self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
+        self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
+        self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
+        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 27)
+        self._panel_sizes = {
+            "main": (curses.LINES - 6, curses.COLS - 26),
+            "left": (curses.LINES - 3, 26),
+            "bottom": (3, curses.COLS - 26),
+            "top": (3, curses.COLS - 26),
+            "left_bottom": (3, 26)
+        }
+        self._stdscr.refresh()
+        self._stdscr.nodelay(True)
 
     @property
     def _focused_user(self) -> str:
@@ -301,22 +308,6 @@ class Application:
                 else:
                     self._focused_user = ""
 
-    def _init_ui(self):
-        self._left_panel = curses.newpad(curses.LINES - 3, 26)
-        self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
-        self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
-        self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
-        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 27)
-        self._panel_sizes = {
-            "main": (curses.LINES - 6, curses.COLS - 26),
-            "left": (curses.LINES - 3, 26),
-            "bottom": (3, curses.COLS - 26),
-            "top": (3, curses.COLS - 26),
-            "left_bottom": (3, 26)
-        }
-        self._stdscr.refresh()
-        self._stdscr.nodelay(True)
-
     def _cycle_focused_user(self, increment: int):
         if self._focused_user:
             next_index = (self._focused_user_index + increment) % len(self._contacts)
@@ -332,7 +323,7 @@ class Application:
         """
         return self._running
 
-    def run(self, stdscr: curses.window):
+    def run(self):
         """The main function to run the application.
 
         Invoked via curses.wrapper
@@ -341,12 +332,9 @@ class Application:
             stdscr (curses.window): The curses screen.
                 Provided by curses.wrapper
         """
-        self._stdscr = stdscr
-        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
         if curses.COLS < 102 or curses.LINES < 9:
             self._client.quit()
             raise Exception("Window too small. Resize your terminal.")
-        self._init_ui()
         if self._focused_user:
             self._draw_main_panel(True)
             self._draw_bottom_bar()
@@ -407,6 +395,10 @@ class Application:
             case 'c':
                 self._create_group()
 
+def run(stdscr: curses.window, client: Client):
+    app = Application(stdscr, client)
+    app.run()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str, help="The server's .vcsms config file")
@@ -429,5 +421,4 @@ if __name__ == "__main__":
     except ClientException:
         print(f"Client failed to connect to server. See log.txt for more information.")
         quit()
-    application = Application(vcsms_client)
-    curses.wrapper(application.run)
+    curses.wrapper(run, vcsms_client)
