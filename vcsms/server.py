@@ -7,7 +7,7 @@ from . import keys
 from . import signing
 from .server_db import Server_DB
 from .logger import Logger
-from .cryptographylib import dhke, sha256, aes256, utils
+from .cryptography import dhke, sha256, aes256, utils
 from .non_stream_socket import NonStreamSocket
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
