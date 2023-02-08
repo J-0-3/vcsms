@@ -6,8 +6,8 @@ import json
 from vcsms.server import Server
 from vcsms.logger import Logger
 from vcsms import keys
-from vcsms.cryptographylib import sha256
-from vcsms.cryptographylib.exceptions import DecryptionFailureException
+from vcsms.cryptography import sha256
+from vcsms.cryptography.exceptions import DecryptionFailureException
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
