@@ -7,8 +7,8 @@ from . import keys
 from . import signing
 from .non_stream_socket import NonStreamSocket
 from .logger import Logger
-from .cryptographylib import dhke, sha256, utils, aes256
-from .cryptographylib.exceptions import DecryptionFailureException
+from .cryptography import dhke, sha256, utils, aes256
+from .cryptography.exceptions import DecryptionFailureException
 from .exceptions.server_connection import *
 
 
