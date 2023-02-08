@@ -1,6 +1,6 @@
 """Defines a number of methods for interacting with cryptographic keys."""
 
-from .cryptographylib import rsa, sha256, aes256
+from .cryptography import rsa, sha256, aes256
 import random
 
 
