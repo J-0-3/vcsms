@@ -2,8 +2,8 @@ import sys
 sys.path.append("..")
 sys.path.append("../..")
 import random
-import vcsms.cryptographylib.rsa as rsa
-from vcsms.cryptographylib.exceptions import DecryptionFailureException
+import vcsms.cryptography.rsa as rsa
+from vcsms.cryptography.exceptions import DecryptionFailureException
 from testing import Test, TestSet
 
 if __name__ == "__main__":

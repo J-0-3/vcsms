@@ -12,7 +12,8 @@ group18_8192 = (2, 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A6
 
 
 def generate_public_key(private_key: int, group: tuple) -> int:
-    """Generate a diffie hellman public key based on a (random) private key and diffie hellman group (base and modulus).
+    """Generate a diffie hellman public key based on a (random) private key 
+    and diffie hellman group (base and modulus).
 
     Args:
         private_key (int): The (randomly chosen) diffie hellman private key

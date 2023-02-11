@@ -4,7 +4,7 @@ import random
 sys.path.append("..")
 sys.path.append(".....")
 from testing import Test, TestSet
-import vcsms.cryptographylib.sha256 as sha256
+import vcsms.cryptography.sha256 as sha256
 
 if __name__ == "__main__":
     print("Generating unit tests...")

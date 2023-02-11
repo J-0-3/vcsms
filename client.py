@@ -168,7 +168,7 @@ class Application:
 
     def _flash_error(self, error: str):
         self._draw_bottom_bar(error, 1)
-        time.sleep(1)
+        time.sleep(0.5)
         self._draw_bottom_bar()
 
     def _draw_left_panel(self):
@@ -345,18 +345,21 @@ class Application:
         self._draw_left_panel()
         self._draw_left_panel_bottom_bar()
         self._running = True
+        last_poll = 0
         while self._running:
-            if self._client.new_message():
-                sender, group, _ = self._client.receive()
-                contact_name = group or sender
-                self._new_message[contact_name] = True
-                if self._focused_user == contact_name:
-                    self._draw_main_panel(True)
-                if (contact_name, bool(group)) not in self._contacts:
-                    self._contacts.append((contact_name, bool(group)))
-                if not self._focused_user:
-                    self._focused_user = contact_name
-                self._draw_left_panel()
+            if time.time() - last_poll >= 1:
+                last_poll = time.time()
+                while self._client.new_message():
+                    sender, group, _ = self._client.receive()
+                    contact_name = group or sender
+                    self._new_message[contact_name] = True
+                    if self._focused_user == contact_name:
+                        self._draw_main_panel(True)
+                    if (contact_name, bool(group)) not in self._contacts:
+                        self._contacts.append((contact_name, bool(group)))
+                    if not self._focused_user:
+                        self._focused_user = contact_name
+                    self._draw_left_panel()
             self._handle_input()
 
     def _handle_input(self):

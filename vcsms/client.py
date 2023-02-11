@@ -8,9 +8,9 @@ import time
 import json
 from json.decoder import JSONDecodeError
 from sqlite3 import IntegrityError as sqliteIntegrityError
-from queue import Queue
 from typing import Callable
 
+from .queue import Queue
 from .cryptography import dhke, sha256, aes256, rsa
 from .cryptography.utils import i_to_b
 from .cryptography.exceptions import DecryptionFailureException
@@ -308,7 +308,7 @@ class Client:
         index = random.randrange(1, 2 ** 64)
         while index in self._messages:
             index = random.randrange(1, 2 ** 64)
-        dh_pub, dh_sig = signing.gen_signed_diffie_hellman(
+        dh_pub, dh_sig = signing.gen_signed_dh(
             dh_priv, self._priv, self._dhke_group, index)
         self._messages[index] = {
             "client_id": recipient_id,
@@ -342,7 +342,7 @@ class Client:
             index = random.randrange(1, 2**64)
             while index in self._messages:
                 index = random.randrange(1, 2**64)
-            dh_pub, dh_sig = signing.gen_signed_diffie_hellman(dh_priv, self._priv, self._dhke_group, index)
+            dh_pub, dh_sig = signing.gen_signed_dh(dh_priv, self._priv, self._dhke_group, index)
             self._messages[index] = {
                 "client_id": recipient,
                 "dh_private": dh_priv,
@@ -811,9 +811,8 @@ class Client:
             self._logger.log(f"Message from unknown user {sender}. Requesting key.", 3)
             return "ResendAuthPacket", (message_index, )
 
-        signature_data = hex(sender_dh_pub)[2:].encode(
-            'utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
-        if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+        sender_rsa = db.get_key(sender)
+        if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
             db.close()
             self._logger.log(
                 f"Invalid Diffie Hellman signature from {sender}", 1)
@@ -821,7 +820,7 @@ class Client:
 
         db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])
-        dh_pub, dh_pub_sig = signing.gen_signed_diffie_hellman(
+        dh_pub, dh_pub_sig = signing.gen_signed_dh(
             dh_priv, self._priv, self._dhke_group, message_index)
         shared_secret = dhke.calculate_shared_key(
             dh_priv, sender_dh_pub, self._dhke_group)
@@ -865,8 +864,8 @@ class Client:
                 self._logger.log(f"Message to unknown user {sender}. Requesting key.", 3)
                 return "ResendAuthPacket", (message_index, )
 
-            signature_data = hex(sender_dh_pub)[2:].encode('utf-8') + b':' + hex(message_index)[2:].encode('utf-8')
-            if not signing.verify(signature_data, sender_dh_sig, db.get_key(sender)):
+            sender_rsa = db.get_key(sender)
+            if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
                 db.close()
                 self._logger.log(f"Invalid public key signature from {sender}", 1)
                 return "InvalidSignature", (message_index, )
@@ -965,7 +964,7 @@ class Client:
             self._messages.pop(message_index)
             self._messages[new_id] = message
             dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self._priv, self._dhke_group, new_id)
+            dh_public, dh_signature = signing.gen_signed_dh(dh_private, self._priv, self._dhke_group, new_id)
             self._logger.log(f"Switching message ID {message_index} to {new_id}", 3)
             return "NewMessage", (new_id, dh_public, dh_signature)
         self._logger.log(f"{sender} reported index in use for message with other user", 2)
@@ -988,7 +987,7 @@ class Client:
             self._logger.log(f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
             message = self._messages[message_index]
             dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_diffie_hellman(dh_private, self._priv, self._dhke_group, message_index)
+            dh_public, dh_signature = signing.gen_signed_dh(dh_private, self._priv, self._dhke_group, message_index)
             if message["encryption_key"]:
                 return "MessageAccept", (message_index, dh_public, dh_signature)
             return "NewMessage", (message_index, dh_public, dh_signature)

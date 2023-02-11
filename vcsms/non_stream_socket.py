@@ -2,7 +2,7 @@ import socket
 import random
 import threading
 import time
-from queue import Queue
+from .queue import Queue
 
 
 class NonStreamSocket:

@@ -22,14 +22,15 @@ s_box = [[0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b
 
 
 def invert_sbox(s_box: list) -> list:
-    """Invert a given substitution box such that looking up an element gives the index
-    of that element in the original s box.
+    """Invert a given substitution box such that looking 
+    up an element gives the index of that element in 
+    the original s box.
 
     Args:
-        s_box (list): 2D list containing the original substitution box
+        s_box (list): 2D list containing the original SBox
 
     Returns:
-        list: 2D list containing the inverted substitution box
+        list: 2D list containing the inverted SBox
     """
 
     inverted_s_box = [[0] * 16 for _ in range(16)]
@@ -173,7 +174,7 @@ def gf_multiply_bytes(x: int, y: int, modulus: int = 0x11b) -> int:
     y_coefficients = byte_to_bits(y)
     z = 0
     for i in range(8):
-        z ^= x * (2 ** i) * y_coefficients[7 - i]
+        z ^= (x << i) * y_coefficients[7 - i]
     return gf_mod_bytes(z, modulus)
 
 
@@ -247,13 +248,14 @@ def shift_rows(state: list, inverse: bool = False) -> list:
     """Cyclically shift (rotate) each row in the state left (right if inverse)
     by an increment of 1 each row.
     [a1 a2 a3 a4] -> [a1 a2 a3 a4]
-    [b1 b2 b3 b4]    [b4 b1 b2 b3]
+    [b1 b2 b3 b4]    [b2 b3 b4 b1]
     [c1 c2 c3 c4]    [c3 c4 c1 c2]
-    [d1 d2 d3 d4]    [d2 d3 d4 d1]
+    [d1 d2 d3 d4]    [d4 d1 d2 d3]
 
     Args:
         state (list): The current AES state matrix
-        inverse (bool, optional): Whether perform the inverse row shift. Defaults to False.
+        inverse (bool, optional): Whether perform the inverse row shift. 
+            (Default False).
 
     Returns:
         list: The shifted state matrix
@@ -279,8 +281,6 @@ def mix_columns(state: list, inverse: bool = False) -> list:
     Returns:
         list: The resultant state matrix.
     """
-
-    columns = transpose_matrix(state)
     if inverse:
         multiplication_matrix = shift_rows([[0x0e, 0x0b, 0x0d, 0x09]]*4, True)
     else:
@@ -292,10 +292,9 @@ def mix_columns(state: list, inverse: bool = False) -> list:
         for i in range(4):
             val = 0
             for j in range(4):
-                val ^= multiply_lookup[columns[c][j]][multiplication_matrix[i][j]]
+                val ^= multiply_lookup[state[j][c]][multiplication_matrix[i][j]]
             col[i] = val
         mixed_columns.append(col)
-
     return transpose_matrix(mixed_columns)
 
 
@@ -550,7 +549,8 @@ def pad(data: bytes, max_pad_bytes: int = 2048) -> bytes:
 
     Args:
         data (bytes): The data to pad
-        max_pad_bytes (int): The maximum number of padding bytes to add. (Default 2048)
+        max_pad_bytes (int): The maximum number of padding bytes to add. 
+            (Default 2048)
 
     Returns:
         bytes: The padded data
@@ -677,12 +677,11 @@ def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False) -> bytes:
         ciphertext_blocks.append(ciphertext_block)
 
     # combine blocks by repeated left shift and OR
-    shift = len(ciphertext_blocks) * 128 - 128  # first block is most significant
+    shift = len(ciphertext_blocks) * 128 - 128
     ciphertext = 0
     for block in ciphertext_blocks:
         ciphertext |= (block << shift)
         shift -= 128
-
     return i_to_b(ciphertext)
 
 

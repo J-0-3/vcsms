@@ -5,7 +5,8 @@ from .utils import i_to_b
 from .exceptions import DecryptionFailureException
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
-    """Recursively calculate the GCD of two integers a and b and also the values x and y such that ax + by = gcd (a,b).
+    """Recursively calculate the GCD of two integers a and b 
+    and also the values x and y such that ax + by = gcd (a,b).
 
     Args:
         a (int)
@@ -26,7 +27,11 @@ def gcd_extended_euclid(a: int, b: int) -> tuple:
 
 
 def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
-    """Calculate the RSA public and private keys for a pair of primes p and q and an exponent e.
+    """Calculate the RSA public and private keys for a pair
+    of primes p and q and an exponent e.
+
+    p and q must be large prime number and e must be coprime 
+    to and less than (p - 1) * (q - 1).
 
     Args:
         p (int): A prime number
@@ -34,27 +39,16 @@ def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
         e (int, optional): The RSA exponent. Defaults to 65537.
 
     Returns:
-        tuple: public key (public exponent, modulus), private key (private exponenet, modulus)
+        tuple: public key (public exponent, modulus), 
+            private key (private exponent, modulus)
     """
-    # p and q must be very large prime numbers
-    # e must be coprime to and less than (p-1) * (q-1)
-
-    # calculate the modulus and public key
     n = p * q
     public_key = (e, n)
     phi = (p - 1) * (q - 1)
 
-    # Here d is the private key exponent and is chosen such that (d * e) mod phi = 1
-
-    # This works as the extended euclidean algorithm returns d and a such that  (d * e) + (a * phi) = 1. When both
-    # sides are taken modulo phi we get ((d * e) + (a * phi)) mod phi = 1 mod phi. ((d * e) + (a * phi)) mod phi can
-    # be expanded to (d * e) mod phi + (a * phi) mod phi by the laws of modular arithmetic and (a * phi) mod phi must
-    # always be 0 as (a * phi) is a multiple of phi. This gives (d * e) mod phi + 0 = 1 mod phi.
-    # 1 mod phi = 1 therefore we are left with d such that (d * e) mod phi = 1
-
     gcd, d, _ = gcd_extended_euclid(e, phi)
-    d %= phi  # this is to eliminate the possibility of negative values for d
-    if e >= phi or gcd != 1:  # e must be coprime to phi
+    d %= phi  # d must not be negative
+    if e >= phi or gcd != 1:
         raise ValueError("INVALID EXPONENT.")
     private_key = (d, n)
     return public_key, private_key

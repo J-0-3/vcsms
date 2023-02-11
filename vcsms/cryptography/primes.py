@@ -3,10 +3,11 @@ import random
 
 
 def sieve_of_eratosthenes(maximum: int) -> list:
-    """Perform the sieve of Eratosthenes to calculate all primes up to a given integer.
+    """Perform the sieve of Eratosthenes to calculate
+    all primes up to a given integer.
 
     Args:
-        maximum (int): The upper limit for primes calculates 
+        maximum (int): The upper limit
 
     Returns:
         list: All the primes up to the maximum
@@ -44,7 +45,7 @@ def miller_rabin_primality_test(n: int, r: int):
         for _ in range(s):
             check_next = False
             b = pow(b, 2, n)
-            if b == n - 1:  # likely is prime (as this means it divides n)
+            if b == n - 1:  # likely is prime (divides n)
                 check_next = True
                 break
         if not check_next:

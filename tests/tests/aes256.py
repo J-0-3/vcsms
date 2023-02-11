@@ -3,8 +3,8 @@ import sys
 sys.path.append("..")
 from testing import Test, TestSet
 sys.path.append("../..")
-import vcsms.cryptographylib.aes256 as aes256
-from vcsms.cryptographylib.exceptions import DecryptionFailureException
+import vcsms.cryptography.aes256 as aes256
+from vcsms.cryptography.exceptions import DecryptionFailureException
 
 if __name__ == "__main__":
     print("Generating unit tests...")

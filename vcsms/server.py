@@ -1,10 +1,10 @@
 import socket
 import random
 import threading
-from queue import Queue
 
 from . import keys
 from . import signing
+from .queue import Queue
 from .server_db import Server_DB
 from .logger import Logger
 from .cryptography import dhke, sha256, aes256, utils
@@ -45,8 +45,6 @@ class Server:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._dhke_group = dhke.group14_2048
-        self._in_queue = Queue()
-        self._out_queue = Queue()
         self._client_outboxes = {}
         self._sockets = {}
         self._db_path = db_path
@@ -82,7 +80,7 @@ class Server:
             message (bytes): The raw message bytes to send.
         """
         if client not in self._client_outboxes:
-            self._logger.log("Message to offline/unknown user {client}", 3)
+            self._logger.log(f"Message to offline/unknown user {client}", 3)
             self._client_outboxes[client] = Queue()
         self._client_outboxes[client].put(message)
 
@@ -121,7 +119,7 @@ class Server:
             return
 
         dhke_priv = random.randrange(1, self._dhke_group[1])
-        dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, self._priv, self._dhke_group)
+        dhke_pub, dhke_sig = signing.gen_signed_dh(dhke_priv, self._priv, self._dhke_group)
         client.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
 
         pubkey_auth_packet = client.recv()

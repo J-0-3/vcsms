@@ -1,7 +1,7 @@
 import socket
 import random
 import threading
-from queue import Queue
+from .queue import Queue
 
 from . import keys
 from . import signing
@@ -79,7 +79,7 @@ class ServerConnection:
         self._socket.send(pub_key_hash + b":" + pub_exp + b":" + pub_mod)
 
         dhke_priv = random.randrange(1, dhke_group[1])
-        dhke_pub, dhke_sig = signing.gen_signed_diffie_hellman(dhke_priv, priv_key, dhke_group)
+        dhke_pub, dhke_sig = signing.gen_signed_dh(dhke_priv, priv_key, dhke_group)
 
         server_auth_packet = self._socket.recv()
         if server_auth_packet == b"MalformedPacket":
