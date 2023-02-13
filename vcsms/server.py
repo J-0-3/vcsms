@@ -82,7 +82,7 @@ class Server:
         if client not in self._client_outboxes:
             self._logger.log(f"Message to offline/unknown user {client}", 3)
             self._client_outboxes[client] = Queue()
-        self._client_outboxes[client].put(message)
+        self._client_outboxes[client].push(message)
 
     def _handshake(self, client: NonStreamSocket):
         """Handshake with a socket to establish its client ID, setup an encrypted connection and begin routing messages to/from it.
@@ -251,7 +251,7 @@ class Server:
         """
         while sock.connected():
             if not outbox.empty():
-                message = outbox.get()
+                message = outbox.pop()
                 aes_iv = random.randrange(1, 2 ** 128)
                 ciphertext = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex()
                 sock.send(hex(aes_iv).encode() + b':' + ciphertext.encode('utf-8'))

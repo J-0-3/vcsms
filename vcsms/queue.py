@@ -1,13 +1,16 @@
 from threading import Lock
+
 class Queue:
     def __init__(self):
         self.queue = []
         self.lock = Lock()
-    def put(self, item: any):
+
+    def push(self, item: any):
         self.lock.acquire()
         self.queue.append(item)
         self.lock.release()
-    def get(self) -> any:
+
+    def pop(self) -> any:
         while True:
             self.lock.acquire()
             if len(self.queue) != 0:

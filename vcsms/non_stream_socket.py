@@ -1,5 +1,4 @@
 import socket
-import random
 import threading
 import time
 from .queue import Queue
@@ -20,38 +19,40 @@ class NonStreamSocket:
         self._queue = Queue()
         self._incoming_in_progress = b''
         self._outgoing_in_progress = b''
-        self._locked = False
+        self._send_lock = threading.Lock()
         self._open = False
 
     def _checklife_thread(self):
-        """A function to be run by a thread which constantly attempts to send the byte \\xfe
-        to the connected socket to test if it is still connected. Once it is not is shuts down the socket.
+        """Constantly attempts to send the byte \\xfe
+        to the connected socket to test if it is still connected. 
+        Once it is not it closes the socket.
         """
         while self._open:
             time.sleep(1)
-            if not self._locked:
-                try:
-                    self.sock.sendall(b'\xfe')
-                except OSError:
-                    self._open = False
-                    break
+            self._send_lock.acquire()
+            try:
+                self.sock.sendall(b'\xfe')
+            except OSError:
+                self._open = False
+            self._send_lock.release()
 
     def _in_thread(self):
-        """A function to be run by a thread which receives incoming data, parses it, and splits it into separate messages using the delimiter \\xff.
+        """Receives incoming data, parses it, and
+         splits it into separate messages using the delimiter \\xff.
         """
         while self._open:
             try:
                 data = self.sock.recv(self._block_size)
+                for c in data:
+                    byte = c.to_bytes(1, 'big')
+                    if byte == b'\xff':
+                        self._queue.push(self._incoming_in_progress)
+                        self._incoming_in_progress = b''
+                    elif byte != b'\xfe':
+                        self._incoming_in_progress += byte
             except OSError:
-                break
-            for c in data:
-                byte = c.to_bytes(1, 'big')
-                if byte == b'\xff':
-                    self._queue.put(self._incoming_in_progress)
-                    self._incoming_in_progress = b''
-                elif byte != b'\xfe':
-                    self._incoming_in_progress += byte
-
+                self._open = False
+            
     def connect(self, addr: str, port: int):
         """Connect to a port on a given ip address.
 
@@ -64,11 +65,13 @@ class NonStreamSocket:
     def close(self):
         """Close the connection and shutdown the socket."""
         self._open = False
+        self._send_lock.acquire()
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass  # connection has already closed
         self.sock.close()
+        self._send_lock.release()
 
     def connected(self) -> bool:
         """Get whether the socket is currently connected.
@@ -84,11 +87,9 @@ class NonStreamSocket:
         Args:
             data (bytes): The payload to send.
         """
-        while self._locked:
-            pass
-        self._locked = True
+        self._send_lock.acquire()
         self.sock.sendall(data + b'\xff')
-        self._locked = False
+        self._send_lock.release()
 
     def recv(self) -> bytes:
         """Block until a new piece of data is available and then return it.
@@ -96,7 +97,7 @@ class NonStreamSocket:
         Returns:
             bytes: The received piece of data.
         """
-        return self._queue.get()
+        return self._queue.pop()
 
     def new(self) -> bool:
         """Get whether there is a piece of data available ready to be received.
@@ -107,7 +108,8 @@ class NonStreamSocket:
         return not self._queue.empty()
 
     def run(self):
-        """Start the socket listening for incoming data. This must be called before any data can be received from the socket."""
+        """Start the socket listening for incoming data. 
+        This must be called before any data can be received from the socket."""
         t_in = threading.Thread(target=self._in_thread, args=())
         t_life = threading.Thread(target=self._checklife_thread, args=())
         self._open = True

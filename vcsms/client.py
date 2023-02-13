@@ -39,9 +39,9 @@ INCOMING_MESSAGE_TYPES = {
     # message index
     "IndexInUse": ([int], [10]),
     "MessageDecryptionFailure": ([int], [10]),
+    "MessageMalformed" :([int], [10]),
     "InvalidSignature": ([int], [10]),
     "NoSuchIndex": ([int], [10]),
-    "ResendAuthPacket": ([int], [10]),
     # message type
     "UnknownMessageType": ([str], ['utf-8']),
     "NotAllowed": ([str], ['utf-8']),
@@ -66,6 +66,7 @@ OUTGOING_MESSAGE_TYPES = {
     # message index
     "IndexInUse": ([int], [10]),
     "MessageDecryptionFailure": ([int], [10]),
+    "MessageMalformed": ([int], [10]),
     "InvalidSignature": ([int], [10]),
     "NoSuchIndex": ([int], [10]),
     "ResendAuthPacket": ([int], [10]),
@@ -131,7 +132,6 @@ class Client:
             "MessageAccept": self._handler_message_accept,
             "MessageData": self._handler_message_data,
             "IndexInUse": self._handler_index_in_use,
-            "ResendAuthPacket": self._handler_resend_auth_packet,
             "CreateGroup": self._handler_create_group,
             "ChangeGroupID": self._handler_change_group_id,
             "GroupIDInUse": self._handler_group_id_in_use
@@ -146,7 +146,7 @@ class Client:
         Returns:
             tuple[str, str, bytes]: The message sender, group name and contents 
         """
-        return self._message_queue.get()
+        return self._message_queue.pop()
 
     def new_message(self) -> bool:
         """Check whether there is a new message available.
@@ -400,7 +400,7 @@ class Client:
                 invite_user(member_id)
             else:
                 self._request_key(member_id)
-                await_key_thread = threading.Thread(target=self._await_key, args=(member_id, invite_user, member_id))
+                await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
                 await_key_thread.start()
 
     def run(self):
@@ -488,21 +488,26 @@ class Client:
         message = self._message_parser.construct_message("0", "GetKey", request_index, client_id)
         self._server.send(message)
 
-    def _await_key(self, client_id: str, callback: Callable, *args):
+    def _await_key(self, client_id: str, timeout: int, callback: Callable, *args):
         """Wait until the public key for a given client id is known and then execute
         a callback function. Useful if the public key is required for some operation
         which can be executed asynchronously.
 
         Args:
             client_id (str): The client id to await the public key of
+            timeout (int): The maximum time to await the key for. (0 for no maximum)
             callback (Callable): A callback function to execute once the key is received. Use 'lambda: None' to run no callback.
             *args: The arguments of the callback function
         """
         db = self._db_connect()
+        start = time.time()
         while not db.user_known(client_id):
             time.sleep(0.1)
+            if time.time() - start >= timeout and timeout > 0:
+                return False
         db.close()
         callback(*args)
+        return True
 
     def _save_in_process_messages(self):
         """Save the status of currently in process messages so that they
@@ -619,7 +624,9 @@ class Client:
         db = self._db_connect()
         if not db.user_known(sender):
             self._request_key(sender)
-            self._await_key(sender, lambda: None)
+            if not self._await_key(sender, 60, lambda: None):
+                self._logger.log("Unable to create group. Creator's public key was not received.", 2)
+                return None
 
         if signing.verify(signature_data, signature, db.get_key(sender)):
             if db.get_group_name(group_id):
@@ -633,7 +640,7 @@ class Client:
                 postfix += 1
             db.create_group(group_name, group_id, sender, members)
             db.close()
-            self._logger.log(f"Group {group_name}:{group_id} successfully created.")
+            self._logger.log(f"Group {group_name}:{group_id} successfully created.", 3)
             return None
         db.close()
         self._logger.log(f"Invalid signature in group creation request.", 2)
@@ -661,7 +668,9 @@ class Client:
             if self.get_id() == db.get_owner(group_id) and sender in group_members:
                 if not db.user_known(sender):
                     self._request_key(sender)
-                    self._await_key(sender, lambda: None)
+                    if not self._await_key(sender, 60, lambda: None):
+                        self._logger.log(f"Could not respond to GroupIDInUse. Client public key not received.", 2)
+                        return None
 
                 request_signature_data = f"{group_name}{group_id}{self.get_id()}".encode('utf-8')
                 if signing.verify(request_signature_data, request_signature, db.get_key(sender)):
@@ -710,7 +719,9 @@ class Client:
                 signature_data = f"{group_name}{old_group_id}{new_group_id}{self.get_id()}".encode('utf-8')
                 if not db.user_known(sender):
                     self._request_key(sender) 
-                    self._await_key(sender, lambda: None)
+                    if not self._await_key(sender, 60, lambda: None):
+                        self._logger.log("Unable to verify group ID change request. Client public key not received.", 2)
+                        return None
                 if signing.verify(signature_data, signature, db.get_key(sender)):
                     if db.get_group_name(new_group_id):
                         response_signature_data = f"{group_name}{new_group_id}{self.get_id()}".encode('utf-8')
@@ -806,10 +817,12 @@ class Client:
 
         db = self._db_connect()
         if not db.user_known(sender):
-            db.close()
             self._request_key(sender)
             self._logger.log(f"Message from unknown user {sender}. Requesting key.", 3)
-            return "ResendAuthPacket", (message_index, )
+            if not self._await_key(sender, 60, lambda: None):
+                db.close()
+                return None
+            # return "ResendAuthPacket", (message_index, )
 
         sender_rsa = db.get_key(sender)
         if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
@@ -860,9 +873,11 @@ class Client:
             db = self._db_connect()
             if not db.user_known(sender):
                 self._request_key(sender)
-                db.close()
                 self._logger.log(f"Message to unknown user {sender}. Requesting key.", 3)
-                return "ResendAuthPacket", (message_index, )
+                if not self._await_key(sender, 60, lambda: None):
+                    db.close()
+                    return None
+                # return "ResendAuthPacket", (message_index, )
 
             sender_rsa = db.get_key(sender)
             if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
@@ -937,7 +952,7 @@ class Client:
                 if sender_name == sender:
                     db.set_nickname(sender, sender)
                 db.insert_message(sender, data, False)
-            self._message_queue.put((sender_name, group_name, data))
+            self._message_queue.push((sender_name, group_name, data))
             db.close()
             self._messages.pop(message_index)
             return None
@@ -957,42 +972,20 @@ class Client:
         """
         message_index = values[0]
 
-        if sender == self._messages[message_index]["client_id"]:
-            self._logger.log(f"Requested message index {message_index} from {sender} but it was already in use", 3)
-            message = self._messages[message_index]
-            new_id = random.randrange(1, 2 ** 64)
-            self._messages.pop(message_index)
-            self._messages[new_id] = message
-            dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_dh(dh_private, self._priv, self._dhke_group, new_id)
-            self._logger.log(f"Switching message ID {message_index} to {new_id}", 3)
-            return "NewMessage", (new_id, dh_public, dh_signature)
-        self._logger.log(f"{sender} reported index in use for message with other user", 2)
-        return "NotAllowed", ("IndexInUse", )
-
-    def _handler_resend_auth_packet(self, sender: str, values: list) -> tuple[str, tuple]:
-        """Handler function for the ResendAuthPacket message type.
-
-        Args:
-            sender (str): The client ID who sent the message.
-            values (list): The parameters of the message (message index (int))
-
-        Returns:
-            tuple[str, tuple]: NewMessage or MessageAccept depending on the message state.
-                NotAllowed: The message index is in use by a different client ID to the sender.
-        """
-        message_index = values[0]
-
-        if sender == self._messages[message_index]["client_id"]:
-            self._logger.log(f"{sender} requested that I resend an authentication packet for message index {message_index}", 2)
-            message = self._messages[message_index]
-            dh_private = message["dh_private"]
-            dh_public, dh_signature = signing.gen_signed_dh(dh_private, self._priv, self._dhke_group, message_index)
-            if message["encryption_key"]:
-                return "MessageAccept", (message_index, dh_public, dh_signature)
-            return "NewMessage", (message_index, dh_public, dh_signature)
-        self._logger.log(f"{sender} is not authorised to act on message {message_index}", 2)
-        return "NotAllowed", ("ResentAuthPacket", )
+        if message_index in self._messages:
+            if sender == self._messages[message_index]["client_id"]:
+                self._logger.log(f"Requested message index {message_index} from {sender} but it was already in use", 3)
+                message = self._messages[message_index]
+                new_id = random.randrange(1, 2 ** 64)
+                self._messages.pop(message_index)
+                self._messages[new_id] = message
+                dh_private = message["dh_private"]
+                dh_public, dh_signature = signing.gen_signed_dh(dh_private, self._priv, self._dhke_group, new_id)
+                self._logger.log(f"Switching message ID {message_index} to {new_id}", 3)
+                return "NewMessage", (new_id, dh_public, dh_signature)
+            self._logger.log(f"{sender} reported index in use for message with other user", 2)
+            return "NotAllowed", ("IndexInUse", )
+        return "NoSuchIndex", (message_index, )
 
     def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:
         """Handler function for unknown message types.

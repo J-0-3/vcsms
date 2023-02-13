@@ -556,9 +556,9 @@ def pad(data: bytes, max_pad_bytes: int = 2048) -> bytes:
         bytes: The padded data
     """
     num_pad_bytes_before = random.randrange(0, max_pad_bytes // 2)
-    padded_data = num_pad_bytes_before.to_bytes(2)
+    padded_data = num_pad_bytes_before.to_bytes(2, 'big')
     num_pad_bytes_after = random.randrange(0, max_pad_bytes // 2)
-    padded_data += num_pad_bytes_after.to_bytes(2)
+    padded_data += num_pad_bytes_after.to_bytes(2, 'big')
     padding_bytes_before = random.randbytes(num_pad_bytes_before)
     padded_data += padding_bytes_before
     padded_data += data
@@ -576,8 +576,8 @@ def unpad(data: bytes) -> bytes:
     Returns:
         bytes: The original data with padding removed.
     """
-    num_before = int.from_bytes(data[:2])
-    num_after = int.from_bytes(data[2:4])
+    num_before = int.from_bytes(data[:2], 'big')
+    num_after = int.from_bytes(data[2:4], 'big')
     return data[num_before + 4:-num_after]
 
 def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:

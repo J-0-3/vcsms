@@ -7,20 +7,26 @@ from .exceptions.message_parser import ParameterCountException, ParameterImpossi
 class MessageParser:
     """A message parser to parse messages and handle them appropriately.
     
-    The message parser uses message schemas and a response map to interpret, construct and handle messages.
+    The message parser uses message schemas and a response map to interpret,
+     construct and handle messages.
     
-    The message schemas are split into incoming and outgoing messages (as some message types may be valid as responses to a server but not as requests from it.)
+    The message schemas are split into incoming and outgoing messages 
+    (as some message types may be valid as responses to a server but not as requests from it.)
     and are always of the form ([argument types], [type conversion information]).
-    The argument types should be python types such as int, str, bytes, list etc and the type conversion information should be the integer base for integers, string encoding for strings,
+    The argument types should be python types such as int, str, bytes, list etc and the type 
+    conversion information should be the integer base for integers, string encoding for strings,
     the item type for lists and None for bytes.
     
-    The response map is a dictionary defining functions to execute when each message type is processed. These functions should always take in the client ID
-    and message parameters and return a tuple containing the response message type and a tuple of message parameters. They should return None if no response
-    is needed.
+    The response map is a dictionary defining functions to execute when each message type is processed.
+     These functions should always take in the client ID
+    and message parameters and return a tuple containing the response message type and a tuple of 
+    message parameters. They should return None if no response is needed.
 
-    Two special response mappings are available which are "unknown" and "default". These define response functions to execute when a message type which is not defined
-    by any message schema or when a message type with no specified response map is processed. They do not need to be implemented but should take an extra parameter second containing
-    the message type that was read.
+    Two special response mappings are available which are "unknown" and "default". These define
+     response functions to execute when a message type which is not defined
+    by any message schema or when a message type with no specified response map is processed.
+     They do not need to be implemented but should take an extra parameter second containing
+     the message type.
 
     Messages always take the form ID:Type: followed by parameters separated by :.
     """
@@ -84,9 +90,12 @@ class MessageParser:
             conversion_info: Additional information about how to convert to the given type.
                 For int: The base of the integer representation
                 For str: The string encoding used
-                For list: A tuple containing the type of the items and conversion information for that type respectively.
+                For list: A tuple containing the type of the items and conversion information
+                    for that type respectively.
                 For bytes: None
 
+        Raises:
+            UnsupportedTypeException: The type to convert to is not implemented
         """
         if convert_to is int:
             base = conversion_info
@@ -106,9 +115,10 @@ class MessageParser:
             raise UnsupportedTypeException(convert_to)
 
     def _convert_to_bytes(self, value: int|str|list|bytes, conversion_info, message_type: str) -> bytes:
-        """Convert a value of any type to a byte representation.
+        """Convert a value of any type to a hex byte representation.
 
-        Supported types are int, str, list and bytes. (Lists must have all elements the same type)
+        Supported types are int, str, list and bytes. (Lists must have 
+            all elements the same type)
 
         Args:
             value (int, str, list, bytes): The value to convert
@@ -118,7 +128,12 @@ class MessageParser:
                 For list: Conversion information for the items in the list
                 For bytes: None
             message_type (str): The message type being processed (e.g. NewMessage)
-
+                (for error logging purposes)
+        
+        Raises:
+            ParameterWrongTypeException: A list element was not the type specified 
+                by the conversion info.
+            UnsupportedTypeException: The value is not of a serialisable type.
         """
         if isinstance(value, int):
             if conversion_info == 10:
@@ -178,20 +193,24 @@ class MessageParser:
         return message
 
     def parse_message(self, data: bytes) -> tuple[str, str, list]:
-        """Parse the raw bytes of a message and extract the sender, message type, and message parameters in the correct types.
+        """Parse the raw bytes of a message and extract the sender, 
+            message type, and message parameters in the correct types.
 
         Args:
             data (bytes): The raw message bytes
 
         Raises:
             MalformedMessageException: The message is not of a valid format.
-            ParameterCountException: The message did not supply the correct number of parameters.
-            ParameterImpossibleTypeCastException: One of the message parameters could not be converted to the correct type.
+            ParameterCountException: The message did not supply the correct 
+                number of parameters.
+            ParameterImpossibleTypeCastException: One of the message parameters
+                could not be converted to the correct type.
 
         Returns:
-            tuple[str, str, list]: The sender, message type and parameters in the correct types.
+            tuple[str, str, list]: The sender, message type and parameters
+                in the correct types.
         """
-        if re.fullmatch(b'^[0-9a-fA-F]+:[A-z]+(:[A-z0-9]+)*(:[A-z0-9]*)$', data) is None:
+        if re.fullmatch(b'^(([0-9a-fA-F]{24})|0):[A-z]+(:[A-Fa-f0-9]+)*:[A-Fa-f0-9]*$', data) is None:
             raise MalformedMessageException(data)
         sender, message_type, payload = data.split(b':', 2)
         sender = sender.decode('utf-8')

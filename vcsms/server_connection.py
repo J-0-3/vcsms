@@ -176,14 +176,14 @@ class ServerConnection:
                 except DecryptionFailureException:
                     self._logger.log("Failed to decrypt message from server", 2)
                     continue
-                self._in_queue.put(message)
+                self._in_queue.push(message)
 
     def _out_thread(self):
         """A function to be run by a thread which encrypts, formats and sends messages in the outgoing queue to the server."""
         while self._connected:
             if not self._out_queue.empty():
                 self._busy = True
-                message = self._out_queue.get()
+                message = self._out_queue.pop()
                 iv = random.randrange(1, 2 ** 128)
                 encrypted = aes256.encrypt_cbc(message, self._encryption_key, iv)
                 self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
@@ -206,7 +206,7 @@ class ServerConnection:
         Args:
             data (bytes): The bytes of the message to send.
         """
-        self._out_queue.put(data)
+        self._out_queue.push(data)
 
     def read(self) -> bytes:
         """Block until a new piece of data is available from the connection and then return it.
@@ -214,7 +214,7 @@ class ServerConnection:
         Returns:
             bytes: The data received from the server.
         """
-        return self._in_queue.get()
+        return self._in_queue.pop()
 
     def new_msg(self) -> bool:
         """Check whether there is any new data from the server.
