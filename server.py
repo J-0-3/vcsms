@@ -21,7 +21,7 @@ if __name__ == "__main__":
     os.makedirs(key_directory, exist_ok=True)
     public_key_path = os.path.join(server_directory, "server.pub")
     private_key_path = os.path.join(server_directory, "server.priv")
-    log_path = os.path.join(server_directory, "log.txt")
+    log_path = os.path.join(server_directory, "server.log")
     database_path = os.path.join(server_directory, "server.db")
 
     private_key_password = input("Enter private key encryption password: ").encode('utf-8')

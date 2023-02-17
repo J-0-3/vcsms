@@ -1,11 +1,10 @@
 """Defines the Logger class for use by the Client and Server classes in logging any important events/errors that may occur."""
-
 import time
 
 
 class Logger:
     """A simple logger class for use in VCSMS."""
-    def __init__(self, loglevel: int, logpath: str):
+    def __init__(self, loglevel: int, logpath: str, vcsms_version: float = 0):
         """Initialise an instance of the Logger class.
 
         Args:

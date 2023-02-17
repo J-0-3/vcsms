@@ -39,7 +39,7 @@ INCOMING_MESSAGE_TYPES = {
     # message index
     "IndexInUse": ([int], [10]),
     "MessageDecryptionFailure": ([int], [10]),
-    "MessageMalformed" :([int], [10]),
+    "MessageDataMalformed" :([int], [10]),
     "InvalidSignature": ([int], [10]),
     "NoSuchIndex": ([int], [10]),
     # message type
@@ -53,7 +53,11 @@ INCOMING_MESSAGE_TYPES = {
     "GroupIDInUse": ([int, bytes], [10, None]),
     # group id
     "NoSuchGroup": ([int], [10]),
-    "GroupNameDecryptionFailure": ([int], [10])
+    "GroupNameDecryptionFailure": ([int], [10]),
+
+    "MalformedCiphertext": (),
+    "InvalidIV": (),
+    "MalformedMessage": ()
 }
 
 OUTGOING_MESSAGE_TYPES = {
@@ -87,7 +91,8 @@ OUTGOING_MESSAGE_TYPES = {
     "GroupIDInUse": ([int, bytes], [10, None]),
     # group id
     "NoSuchGroup": ([int], [10]),
-    "GroupNameDecryptionFailure": ([int], 10)
+    "GroupNameDecryptionFailure": ([int], 10),
+    "Quit": ()
 }
 
 class Client:

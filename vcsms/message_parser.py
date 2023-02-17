@@ -7,28 +7,16 @@ from .exceptions.message_parser import ParameterCountException, ParameterImpossi
 class MessageParser:
     """A message parser to parse messages and handle them appropriately.
     
-    The message parser uses message schemas and a response map to interpret,
-     construct and handle messages.
-    
     The message schemas are split into incoming and outgoing messages 
-    (as some message types may be valid as responses to a server but not as requests from it.)
     and are always of the form ([argument types], [type conversion information]).
-    The argument types should be python types such as int, str, bytes, list etc and the type 
-    conversion information should be the integer base for integers, string encoding for strings,
+    Conversion information should be the integer base for integers, string encoding for strings,
     the item type for lists and None for bytes.
     
-    The response map is a dictionary defining functions to execute when each message type is processed.
-     These functions should always take in the client ID
-    and message parameters and return a tuple containing the response message type and a tuple of 
-    message parameters. They should return None if no response is needed.
+    The response map is a dictionary defining functions to execute
+    when each message type is processed.
 
-    Two special response mappings are available which are "unknown" and "default". These define
-     response functions to execute when a message type which is not defined
-    by any message schema or when a message type with no specified response map is processed.
-     They do not need to be implemented but should take an extra parameter second containing
-     the message type.
-
-    Messages always take the form ID:Type: followed by parameters separated by :.
+    Handler "default": Executes for known message types with no handler.
+    Handler "unknown": Executes for unknown message types.
     """
     def __init__(self, incoming_message_types: dict[str, tuple[list[type], list]],
                  outgoing_message_types: dict[str, tuple[list[type], list]], response_map: dict[str, Callable]):
@@ -109,7 +97,8 @@ class MessageParser:
             item_type, item_conversion_info = conversion_info
             list_items = []
             for item in bytes.fromhex(value.decode('utf-8')).split(b','):
-                list_items.append(self._convert_from_bytes(item, item_type, item_conversion_info))
+                typed_item = self._convert_from_bytes(item, item_type, item_conversion_info)
+                list_items.append(typed_item)
             return list_items
         else:
             raise UnsupportedTypeException(convert_to)

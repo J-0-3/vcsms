@@ -410,7 +410,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with open(args.config, 'r', encoding='utf-8') as conf:
         serverconf = json.load(conf)
-    logger = Logger(5, os.path.join(args.directory, "log.txt"))
+    logger = Logger(5, os.path.join(args.directory, "client.log"))
     if args.password:
         vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
     else:

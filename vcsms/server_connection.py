@@ -67,7 +67,7 @@ class ServerConnection:
             server_exp, server_mod = self._socket.recv().split(b':')
             self._public_key = (int(server_exp, 16), int(server_mod, 16))
         except ValueError:
-            self._socket.send(b"MalformedPacket")
+            self._socket.send(b"MalformedIdentity")
             self._socket.close()
             raise MalformedPacketException()
         if keys.fingerprint(self._public_key, 64) != self._fp:
@@ -82,7 +82,7 @@ class ServerConnection:
         dhke_pub, dhke_sig = signing.gen_signed_dh(dhke_priv, priv_key, dhke_group)
 
         server_auth_packet = self._socket.recv()
-        if server_auth_packet == b"MalformedPacket":
+        if server_auth_packet == b"MalformedIdentity":
             self._socket.close()
             raise ServerConnectionAbort("Malformed identity packet")
         elif server_auth_packet == b"PubKeyIdMismatch":
@@ -91,7 +91,7 @@ class ServerConnection:
         try:
             s_dhke_pub, s_dhke_pub_sig = server_auth_packet.split(b':')
         except ValueError:
-            self._socket.send(b"MalformedPacket")
+            self._socket.send(b"MalformedDiffieHellman")
             self._socket.close()
             raise MalformedPacketException()
 
@@ -105,9 +105,9 @@ class ServerConnection:
         self._encryption_key = sha256.hash(utils.i_to_b(shared_key))
 
         encrypted_confirmation = self._socket.recv()
-        if encrypted_confirmation == b"MalformedPacket":
+        if encrypted_confirmation == b"MalformedDiffieHellman":
             self._socket.close()
-            raise ServerConnectionAbort("Malformed authentication packet")
+            raise ServerConnectionAbort("Malformed DH authentication packet")
         elif encrypted_confirmation == b"BadSignature":
             self._socket.close()
             raise ServerConnectionAbort("Incorrectly signed diffie hellman public key")
@@ -119,7 +119,7 @@ class ServerConnection:
             iv = int(iv, 16)
             ciphertext = bytes.fromhex(ciphertext.decode('utf-8'))
         except ValueError:
-            self._socket.send(b"MalformedPacket")
+            self._socket.send(b"MalformedChallenge")
             self._socket.close()
             raise MalformedPacketException()
         try:
@@ -130,7 +130,7 @@ class ServerConnection:
             raise KeyConfirmationFailureException()
         self._socket.send(plaintext.hex().encode('utf-8'))
         response = self._socket.recv()
-        if response == b"MalformedPacket":
+        if response == b"MalformedResponse":
             self._socket.close()
             raise ServerConnectionAbort("Malformed challenge response")
         if response != b"OK":

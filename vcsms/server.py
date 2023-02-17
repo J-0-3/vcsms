@@ -21,7 +21,10 @@ INCOMING_MESSAGE_TYPES = {
 
 OUTGOING_MESSAGE_TYPES = {
     "KeyFound": ([int, int, int], [10, 16, 16]),
-    "KeyNotFound": ([int], [10])
+    "KeyNotFound": ([int], [10]),
+    "InvalidIV": (),
+    "MalformedCiphertext": (),
+    "MalformedMessage": ()
 }
 
 
@@ -94,8 +97,8 @@ class Server:
         pub_mod = hex(self._pub[1])[2:].encode()
         client.send(pub_exp + b':' + pub_mod)
         identity_packet = client.recv()
-        if identity_packet == b"MalformedPacket":
-            self._logger.log("Connection failure. Client reported a malformed identity packet.", 1)
+        if identity_packet == b"MalformedIdentity":
+            self._logger.log("Connection failure. Client reported a malformed public key.", 1)
             client.close()
             return
         elif identity_packet == b"PubKeyFpMismatch":
@@ -107,7 +110,7 @@ class Server:
             c_id = c_id.decode()
         except ValueError:
             self._logger.log("Connection failure. Malformed identity packet.", 1)
-            client.send(b"MalformedPacket")
+            client.send(b"MalformedIdentity")
             client.close()
             return
         self._logger.log(f"Client authenticating as {c_id}", 2)
@@ -127,7 +130,7 @@ class Server:
             self._logger.log(f"Connection failure. Client reported an incorrect signature.", 1)
             client.close()
             return
-        elif pubkey_auth_packet == b"MalformedPacket":
+        elif pubkey_auth_packet == b"MalformedDiffieHellman":
             self._logger.log(f"Connection failure. Client reported a malformed DH signature authentication packet.", 1)
             client.close()
             return
@@ -135,7 +138,7 @@ class Server:
             c_dhke_pub, c_dhke_pub_sig = pubkey_auth_packet.split(b':')
         except ValueError:
             self._logger.log(f"Connection failure. Malformed DH signature authentication packet.", 1)
-            client.send(b"MalformedPacket")
+            client.send(b"MalformedDiffieHellman")
             client.close()
             return
         if not signing.verify(c_dhke_pub, c_dhke_pub_sig, client_pubkey):
@@ -161,7 +164,7 @@ class Server:
         encrypted_confirmation = aes256.encrypt_cbc(random_data, encryption_key, enc_iv)
         client.send(hex(enc_iv)[2:].encode('utf-8') + b':' + encrypted_confirmation.hex().encode('utf-8'))
         client_confirm = client.recv()
-        if client_confirm == b"MalformedPacket":
+        if client_confirm == b"MalformedChallenge":
             self._logger.log("Connection Failure. Client reported a malformed confirmation packet.")
             client.close()
             return
@@ -173,7 +176,7 @@ class Server:
             client_confirm = bytes.fromhex(client_confirm.decode('utf-8'))
         except ValueError:
             self._logger.log("Connection Failure. Malformed challenge response.", 1)
-            client.send(b"MalformedPacket")
+            client.send(b"MalformedResponse")
             client.close()
             return
         if client_confirm != random_data:
@@ -211,18 +214,23 @@ class Server:
                     aes_iv, ciphertext = raw.decode().split(':', 1)
                 except ValueError:
                     self._logger.log(f"Malformed message from {client_id}", 2)
-                    return
+                    error_msg = self._message_parser.construct_message("0", "MalformedCiphertext")
+                    self.send(client_id, error_msg)
+                    continue
                 try:
                     aes_iv = int(aes_iv, 16)
                 except ValueError:
                     self._logger.log(f"Invalid initialization vector {aes_iv}", 2)
-                    return
+                    error_msg = self._message_parser.construct_message("0", "InvalidIV")
+                    continue
                 data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
                 try:
                     recipient, message_type, message_values = self._message_parser.parse_message(data)
                 except MessageParseException as parse_exception:
                     self._logger.log(str(parse_exception), 2)
-                    return
+                    error_msg = self._message_parser.construct_message("0", "MalformedMessage") 
+                    self.send(client_id, error_msg)
+                    continue
 
                 self._logger.log(f"{message_type} {client_id} -> {recipient}", 3)
                 if recipient == "0":
@@ -245,9 +253,11 @@ class Server:
         the outbox queue, encrypts them, and sends them to the given client socket.
 
         Args:
-            sock (NonStreamSocket): The socket for the client with whom the outbox is associated.
+            sock (NonStreamSocket): The socket for the client with whom the outbox
+                is associated.
             outbox (Queue): A queue of messages meant for a specific client.
-            encryption_key (int): The encryption key to for all messages exchanged with the client.
+            encryption_key (int): The encryption key to for all messages exchanged
+                with the client.
         """
         while sock.connected():
             if not outbox.empty():
