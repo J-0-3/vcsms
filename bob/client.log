@@ -1,0 +1,58 @@
+Sat Feb 18 00:32:35 2023|2|Generating master key challenge
+Sat Feb 18 00:32:35 2023|2|Generating RSA keypair
+Sat Feb 18 00:32:37 2023|2|Connecting to server.
+Sat Feb 18 00:32:37 2023|2|Connection successful.
+Sat Feb 18 00:34:59 2023|2|Successful login
+Sat Feb 18 00:34:59 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:34:59 2023|2|Connecting to server.
+Sat Feb 18 00:35:00 2023|2|Connection successful.
+Sat Feb 18 00:40:35 2023|2|Successful login
+Sat Feb 18 00:40:35 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:40:35 2023|2|Connecting to server.
+Sat Feb 18 00:40:35 2023|2|Connection successful.
+Sat Feb 18 00:46:02 2023|2|Successful login
+Sat Feb 18 00:46:02 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:46:02 2023|2|Connecting to server.
+Sat Feb 18 00:46:02 2023|2|Connection successful.
+Sat Feb 18 00:46:34 2023|3|Message to unknown user 6199efe5c86d2043f7236d75. Requesting key.
+Sat Feb 18 00:46:35 2023|3|Key received from server for 6199efe5c86d2043f7236d75.
+Sat Feb 18 00:53:48 2023|2|Shutting down client program
+Sat Feb 18 00:53:48 2023|3|Trying to close connection to server
+Sat Feb 18 00:53:48 2023|3|Able to close connection
+Sat Feb 18 00:53:48 2023|2|Closed connection to server
+Sat Feb 18 00:53:54 2023|2|Successful login
+Sat Feb 18 00:53:54 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:53:54 2023|2|Connecting to server.
+Sat Feb 18 00:53:54 2023|2|Connection successful.
+Sat Feb 18 00:54:07 2023|1|Group creation attempt from 6199efe5c86d2043f7236d75: name = mygrp, id = 12477113434321332645, members = ['8200375d802be89e5438ad08']
+Sat Feb 18 00:54:07 2023|3|Group mygrp:12477113434321332645 successfully created.
+Sat Feb 18 00:54:47 2023|2|Shutting down client program
+Sat Feb 18 00:54:47 2023|3|Trying to close connection to server
+Sat Feb 18 00:54:47 2023|3|Able to close connection
+Sat Feb 18 00:54:47 2023|2|Closed connection to server
+Sat Feb 18 00:54:50 2023|2|Successful login
+Sat Feb 18 00:54:50 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:54:50 2023|2|Connecting to server.
+Sat Feb 18 00:54:50 2023|2|Connection successful.
+Sat Feb 18 00:55:46 2023|2|Shutting down client program
+Sat Feb 18 00:55:46 2023|3|Trying to close connection to server
+Sat Feb 18 00:55:46 2023|3|Able to close connection
+Sat Feb 18 00:55:46 2023|2|Closed connection to server
+Sat Feb 18 00:55:48 2023|2|Successful login
+Sat Feb 18 00:55:49 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 00:55:49 2023|2|Connecting to server.
+Sat Feb 18 00:55:49 2023|2|Connection successful.
+Sat Feb 18 01:01:35 2023|2|Shutting down client program
+Sat Feb 18 01:01:35 2023|3|Trying to close connection to server
+Sat Feb 18 01:01:35 2023|3|Able to close connection
+Sat Feb 18 01:01:35 2023|2|Closed connection to server
+Sat Feb 18 01:01:37 2023|2|Successful login
+Sat Feb 18 01:01:37 2023|2|Successfully loaded RSA keypair
+Sat Feb 18 01:01:37 2023|2|Connecting to server.
+Sat Feb 18 01:01:37 2023|2|Connection successful.
+Sat Feb 18 01:02:09 2023|3|Group 12477113434321332645 message hello alice -> 6199efe5c86d2043f7236d75
+Sat Feb 18 01:02:29 2023|3|Group 12477113434321332645 message hello? -> 6199efe5c86d2043f7236d75
+Sat Feb 18 01:02:43 2023|2|Shutting down client program
+Sat Feb 18 01:02:43 2023|3|Trying to close connection to server
+Sat Feb 18 01:02:43 2023|3|Able to close connection
+Sat Feb 18 01:02:43 2023|2|Closed connection to server

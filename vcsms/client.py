@@ -55,9 +55,9 @@ INCOMING_MESSAGE_TYPES = {
     "NoSuchGroup": ([int], [10]),
     "GroupNameDecryptionFailure": ([int], [10]),
 
-    "MalformedCiphertext": (),
-    "InvalidIV": (),
-    "MalformedMessage": ()
+    "MalformedCiphertext": ([], []),
+    "InvalidIV": ([], []),
+    "MalformedMessage": ([], [])
 }
 
 OUTGOING_MESSAGE_TYPES = {
@@ -92,7 +92,7 @@ OUTGOING_MESSAGE_TYPES = {
     # group id
     "NoSuchGroup": ([int], [10]),
     "GroupNameDecryptionFailure": ([int], 10),
-    "Quit": ()
+    "Quit": ([], [])
 }
 
 class Client:
@@ -116,7 +116,8 @@ class Client:
         """
         self._ip = ip
         self._port = port
-        self._fingerprint = fingerprint
+        self._id = ""
+        self._server_fingerprint = fingerprint
         self._server = None
         self._app_dir = application_directory
         self._pub = ()
@@ -124,10 +125,9 @@ class Client:
         self._dhke_group = dhke.group14_2048
         self._messages = {}
         self._key_requests = {}
-        self._client_pubkeys = {}
         self._running = False
-        self._encryption_key = sha256.hash(master_password.encode('utf-8'))
-        self._nickname_iv = 0
+        self._local_encryption_key = sha256.hash(master_password.encode('utf-8'))
+        self._name_salt = b''
         self._message_queue = Queue()
         self._group_message_queue = Queue()
         message_response_map = {
@@ -144,6 +144,14 @@ class Client:
         self._message_parser = MessageParser(
             INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, message_response_map)
         self._logger = logger
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    @property
+    def id(self) -> str:
+        return self._id
 
     def receive(self) -> tuple[str, str, bytes]:
         """Block until a new message is available and then return it.
@@ -249,10 +257,9 @@ class Client:
         else:
             messages_in_single_user_form = db.get_messages_by_nickname(name, count)
             messages = []
-            my_id = self.get_id()
             for message in messages_in_single_user_form:
                 data, outgoing = message
-                messages.append((data, my_id if outgoing else name))
+                messages.append((data, self._id if outgoing else name))
         
         db.close()
         return messages
@@ -305,7 +312,7 @@ class Client:
                 db.set_nickname(recipient, recipient)
                 recipient_id = recipient
             else:
-                self._logger.log(f"User {recipient} not found.")
+                self._logger.log(f"User {recipient} not found.", 1)
                 raise UserNotFoundException(recipient)
         db.insert_message(recipient_id, message, True)
         db.close()
@@ -339,9 +346,9 @@ class Client:
             self._logger.log(f"Group {group_name} not found", 1)
             raise GroupNotFoundException(group_name)
         recipients = db.get_members(group_name)
-        recipients.remove(self.get_id())
+        recipients.remove(self._id)
 
-        db.insert_group_message(group, message, self.get_id())
+        db.insert_group_message(group, message, self._id)
         for recipient in recipients:
             dh_priv = random.randrange(1, self._dhke_group[1])
             index = random.randrange(1, 2**64)
@@ -387,7 +394,7 @@ class Client:
             raise GroupNameInUseException(name)
         self._logger.log(f"Creating group {name}: id = {group_id}, members = {member_ids}", 1)
 
-        db.create_group(name, group_id, self.get_id(), member_ids)
+        db.create_group(name, group_id, self._id, member_ids)
 
         def invite_user(user: str):
             key = db.get_key(user)
@@ -425,19 +432,20 @@ class Client:
             self._logger.log("Generating master key challenge", 2)
         self._create_master_key_test()
 
-        if os.path.exists(os.path.join(self._app_dir, "nickname.iv")):
-            with open(os.path.join(self._app_dir, "nickname.iv"), 'r', encoding='utf-8') as f:
-                ciphertext_iv, ciphertext = f.read().split(':')
-            ciphertext_iv = int(ciphertext_iv, 16)
-            ciphertext = bytes.fromhex(ciphertext)
-            self._nickname_iv = int(aes256.decrypt_cbc(ciphertext, self._encryption_key, ciphertext_iv), 16)
+        if os.path.exists(os.path.join(self._app_dir, "names.salt")):
+            with open(os.path.join(self._app_dir, "names.salt"), 'r') as f:
+                salt_iv_hex, salt_encrypted_hex = f.read().split(':')
+                salt_iv = int(salt_iv_hex, 16)
+                salt_encrypted = bytes.fromhex(salt_encrypted_hex)
+                self._name_salt = aes256.decrypt_cbc(salt_encrypted, self._local_encryption_key, salt_iv)
         else:
-            self._nickname_iv = random.randrange(0, 2**128)
-            with open(os.path.join(self._app_dir, "nickname.iv"), 'w+', encoding='utf-8') as f:
-                ciphertext_iv = random.randrange(0, 2**128)
-                ciphertext = aes256.encrypt_cbc(hex(self._nickname_iv)[2:].encode('utf-8'), self._encryption_key, ciphertext_iv)
-                f.write(f"{hex(ciphertext_iv)[2:]}:{ciphertext.hex()}")
-
+            with open(os.path.join(self._app_dir, "names.salt"), 'w+') as f:
+                self._name_salt = random.randbytes(256)
+                salt_iv = random.randrange(1, 2**128)
+                salt_encrypted = aes256.encrypt_cbc(self._name_salt, self._local_encryption_key, salt_iv) 
+                salt_iv_hex = hex(salt_iv)[2:]
+                salt_encrypted_hex = salt_encrypted.hex()
+                f.write(f"{salt_iv_hex}:{salt_encrypted_hex}")
         db = self._db_connect()
         db.setup()
         db.close()
@@ -445,13 +453,14 @@ class Client:
         private_key_path = os.path.join(self._app_dir, "client.priv")
         try:
             self._pub = keys.load_key(public_key_path)
-            self._priv = keys.load_key(private_key_path, self._encryption_key)
+            self._priv = keys.load_key(private_key_path, self._local_encryption_key)
             self._logger.log("Successfully loaded RSA keypair", 2)
         except FileNotFoundError:
             self._logger.log("Generating RSA keypair", 2)
-            self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._encryption_key)
+            self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._local_encryption_key)
 
-        self._server = ServerConnection(self._ip, self._port, self._fingerprint, self._logger)
+        self._id = keys.fingerprint(self._pub)
+        self._server = ServerConnection(self._ip, self._port, self._server_fingerprint, self._logger)
         self._logger.log("Connecting to server.", 2)
         try:
             self._server.connect(self._pub, self._priv)
@@ -471,14 +480,6 @@ class Client:
         self._running = False
         self._server.close()
         self._save_in_process_messages()
-
-    def get_id(self) -> str:
-        """Get the client ID associated with this client instance.
-
-        Returns:
-            str: The client ID (pub key fingerprint) corresponding with this instance of the client.
-        """
-        return keys.fingerprint(self._pub)
 
     def _request_key(self, client_id: str):
         """Request a user's public key from the server.
@@ -522,7 +523,7 @@ class Client:
             for index,message in self._messages.items():
                 message_status_json = json.dumps(message)
                 initialisation_vector = random.randrange(1, 2**128)
-                encrypted_message_status = aes256.encrypt_cbc(message_status_json.encode('utf-8'), self._encryption_key, initialisation_vector)
+                encrypted_message_status = aes256.encrypt_cbc(message_status_json.encode('utf-8'), self._local_encryption_key, initialisation_vector)
                 encrypted_statuses_json[index] = f"{initialisation_vector}:{encrypted_message_status.hex()}"
             json.dump(encrypted_statuses_json, f)
 
@@ -535,7 +536,7 @@ class Client:
                     initialisation_vector, ciphertext_hex = encrypted_record.split(':')
                     initialisation_vector = int(initialisation_vector)
                     ciphertext = bytes.fromhex(ciphertext_hex)
-                    message_status = aes256.decrypt_cbc(ciphertext, self._encryption_key, initialisation_vector)
+                    message_status = aes256.decrypt_cbc(ciphertext, self._local_encryption_key, initialisation_vector)
                     message_status_json = json.loads(message_status.decode('utf-8'))
                     self._messages[int(index)] = message_status_json
 
@@ -548,7 +549,7 @@ class Client:
         with open(os.path.join(self._app_dir, "keytest"), 'w+', encoding='utf-8') as f:
             data = random.randbytes(1024)
             aes_iv = random.randrange(0, 2**128)
-            encrypted_data = aes256.encrypt_cbc(data, self._encryption_key, aes_iv)
+            encrypted_data = aes256.encrypt_cbc(data, self._local_encryption_key, aes_iv)
             f.write(f"{data.hex()}:{hex(aes_iv)[2:]}:{encrypted_data.hex()}")
 
     def _check_master_key(self) -> bool:
@@ -564,7 +565,7 @@ class Client:
         aes_iv = int(aes_iv, 16)
         ciphertext = bytes.fromhex(ciphertext)
         try:
-            if plaintext == aes256.decrypt_cbc(ciphertext, self._encryption_key, aes_iv):
+            if plaintext == aes256.decrypt_cbc(ciphertext, self._local_encryption_key, aes_iv):
                 return True
         except DecryptionFailureException:
             return False
@@ -624,7 +625,7 @@ class Client:
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
         signature_data = (group_name + hex(group_id) + ''.join(members)
-                          + self.get_id()).encode('utf-8')
+                          + self._id).encode('utf-8')
         self._logger.log(f"Group creation attempt from {sender}: name = {group_name}, id = {group_id}, members = {members}", 1)
         db = self._db_connect()
         if not db.user_known(sender):
@@ -670,14 +671,13 @@ class Client:
         group_name = db.get_group_name(group_id)
         group_members = db.get_members_by_id(group_id)
         if group_members:
-            if self.get_id() == db.get_owner(group_id) and sender in group_members:
+            if self._id == db.get_owner(group_id) and sender in group_members:
                 if not db.user_known(sender):
                     self._request_key(sender)
                     if not self._await_key(sender, 60, lambda: None):
                         self._logger.log(f"Could not respond to GroupIDInUse. Client public key not received.", 2)
                         return None
-
-                request_signature_data = f"{group_name}{group_id}{self.get_id()}".encode('utf-8')
+                request_signature_data = f"{group_name}{group_id}{self._id}".encode('utf-8')
                 if signing.verify(request_signature_data, request_signature, db.get_key(sender)):
                     new_group_id = random.randrange(1, 2**64)
                     while db.get_group_name(new_group_id):
@@ -721,7 +721,7 @@ class Client:
         if sender == db.get_owner(old_group_id):
             group_name = db.get_group_name(old_group_id)
             if group_name:
-                signature_data = f"{group_name}{old_group_id}{new_group_id}{self.get_id()}".encode('utf-8')
+                signature_data = f"{group_name}{old_group_id}{new_group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
                     self._request_key(sender) 
                     if not self._await_key(sender, 60, lambda: None):
@@ -729,7 +729,7 @@ class Client:
                         return None
                 if signing.verify(signature_data, signature, db.get_key(sender)):
                     if db.get_group_name(new_group_id):
-                        response_signature_data = f"{group_name}{new_group_id}{self.get_id()}".encode('utf-8')
+                        response_signature_data = f"{group_name}{new_group_id}{self._id}".encode('utf-8')
                         response_signature = signing.sign(response_signature_data, self._priv)
                         self._logger.log(f"{sender} tried to change a group ID to one already in use.", 3)
                         return "GroupIDInUse", (new_group_id, response_signature)
@@ -952,6 +952,7 @@ class Client:
                 if sender in db.get_members_by_id(group):
                     db.insert_group_message(group, data, sender)
                 else:
+                    self._logger.log(f"{sender} sent a message to group {group} of which they or I am not a member.", 2)
                     return "NotAllowed", ("MessageData", )
             else:
                 if sender_name == sender:
@@ -1013,6 +1014,6 @@ class Client:
             Client_DB: A connection to the client database
         """
         db = client_db.Client_DB(os.path.join(self._app_dir, "client.db"), os.path.join(
-            self._app_dir, "keys") + "/", self._encryption_key, self._nickname_iv)
+            self._app_dir, "keys") + "/", self._local_encryption_key, self._name_salt)
         return db
 

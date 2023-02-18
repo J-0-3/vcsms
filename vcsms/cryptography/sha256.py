@@ -104,7 +104,7 @@ def hash(message: bytes) -> int:
         H[3] * 2 ** 128 + H[2] * 2 ** 160 + H[1] * 2 ** 192 + H[0] * 2 ** 224 
     return resultant_hash
 
-def hex_digest(val: bytes) -> str:
+def hash_hex(val: bytes) -> str:
     """Calculate the hash of the value and return it as a 64 character hex string"""
     hex_hash = hex(hash(val))[2:]
     while len(hex_hash) < 64:

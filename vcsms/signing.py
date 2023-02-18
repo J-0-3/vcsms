@@ -21,7 +21,7 @@ def sign(data: bytes, priv_key: tuple[int, int], ttl: int = 60) -> bytes:
     return signature.hex().encode('utf-8')
 
 
-def verify(data: bytes, signature: bytes, pub_key: tuple[int, int]) -> bool:
+def verify(data: bytes, signature: bytes, pub_key: tuple) -> bool:
     """Verify that a signature is valid for a piece of data with a given public key.
 
     Args:
@@ -50,8 +50,8 @@ def verify(data: bytes, signature: bytes, pub_key: tuple[int, int]) -> bool:
     return False
 
 
-def gen_signed_dh(dh_private_key: int, rsa_private_key: tuple[int, int],
-                              dh_group: tuple[int, int], message_id: int = 0) -> tuple[int, bytes]:
+def gen_signed_dh(dh_private_key: int, rsa_private_key: tuple,
+                              dh_group: tuple, message_id: int = 0) -> tuple:
     """Generate a signed diffie hellman public key.
 
     Args:

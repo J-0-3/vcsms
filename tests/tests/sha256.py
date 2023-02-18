@@ -10,28 +10,28 @@ if __name__ == "__main__":
     print("Generating unit tests...")
 single_byte_test = Test(
     "all single byte values",
-    sha256.hex_digest,
+    sha256.hash_hex,
     [((byte.to_bytes(1, 'big'), ), hashlib.sha256(byte.to_bytes(1, 'big')).hexdigest()) for byte in range(256)],
     "eq"
 )
 
 random_32_byte_test = Test(
     "500 random 32 byte values",
-    sha256.hex_digest,
+    sha256.hash_hex,
     [((val,), hashlib.sha256(val).hexdigest()) for val in [random.randbytes(32) for _ in range(500)]],
     "eq"
 )
 
 random_length_value_test = Test(
     "1000 random < 1KB bytestrings",
-    sha256.hex_digest,
+    sha256.hash_hex,
     [((val,), hashlib.sha256(val).hexdigest()) for val in [random.randbytes(random.randrange(0, 1024)) for _ in range(1000)]],
     "eq"
 )
 
 random_4mb_value_test = Test(
     "5 1MB pieces of data",
-    sha256.hex_digest,
+    sha256.hash_hex,
     [((val, ), hashlib.sha256(val).hexdigest()) for val in [random.randbytes(1048576) for _ in range(5)]],
     "eq"
 )

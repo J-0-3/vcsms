@@ -4,39 +4,40 @@ import sqlite3
 import os
 import random
 from . import keys
-from .cryptography import aes256
+from .cryptography import aes256, sha256
 
 
 class Client_DB:
     """A connection to the client sqlite3 database"""
     _cached_message_plaintexts = {}
-    _cached_nickname_ciphertexts = {}
+    _cached_nickname_hashes = {}
     _cached_nickname_plaintexts = {}
     _cached_groupname_plaintexts = {}
-    _cached_groupname_ciphertexts = {}
-    def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_iv: int):
+    _cached_groupname_hashes = {}
+    def __init__(self, path: str, key_file_prefix: str, encryption_key: int, nickname_salt: bytes):
         """Constructor for the Client_DB class.
 
         Args:
             path (str): The path to the sqlite3 database file.
             key_file_prefix (str): A string to prepend to all public key files.
             encryption_key (int): The encryption key to use when storing messages and nicknames.
-            nickname_iv (int): The initialization vector used when encrypting contacts' nicknames
+            nickname_salt (bytes): The salt used when hashing contacts' nicknames
                 and the names of groups.
         """
         self._db = sqlite3.connect(path)
         self._key_file_prefix = key_file_prefix
         self._encryption_key = encryption_key
-        self._nickname_iv = nickname_iv
+        self._name_salt = nickname_salt
 
     def setup(self):
         """Create the database if it has not already been created"""
 
-        self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text primary key unique, nickname blob unique)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS messages (id integer primary key autoincrement, sender_id text, content blob, outgoing integer, timestamp integer, iv text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text primary key unique, name blob unique, owner_id text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text primary key unique, hash text unique, ciphertext blob, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS messages (id integer primary key autoincrement, sender_id text, content blob, outgoing integer, timestamp integer, iv text unique)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_owners (id text primary key unique, owner_id text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_names (id text unique, hash text unique, ciphertext blob, iv text unique)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (id integer primary key autoincrement, group_id text, sender_id text, content blob, timestamp integer, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (id integer primary key autoincrement, group_id text, sender_id text, content blob, timestamp integer, iv text unique)")
         self._db.commit()
 
     def get_group_name(self, group_id: int) -> str | None:
@@ -49,73 +50,70 @@ class Client_DB:
             str | None: The group name (None if it does not exist)
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT name FROM groups WHERE id=?", (hex(group_id), ))
-        result = cursor.fetchone()
-        if result is None:
+        cursor.execute("SELECT ciphertext, iv FROM group_names WHERE id=?", (hex(group_id), ))
+        res = cursor.fetchone()
+        if res is None:
             return None
-        group_name_encrypted = result[0]
-        if group_name_encrypted in self._cached_groupname_plaintexts:
-            return self._cached_groupname_plaintexts[group_name_encrypted]
+        ciphertext, iv_hex = res
+        iv = int(iv_hex, 16)
+        if (ciphertext, iv) in self._cached_groupname_plaintexts:
+            return self._cached_groupname_plaintexts[(ciphertext, iv)]
         else:
-            plaintext = aes256.decrypt_cbc(group_name_encrypted, self._encryption_key, self._nickname_iv).decode('utf-8')
-            self._cached_groupname_plaintexts[group_name_encrypted] = plaintext
-            self._cached_groupname_ciphertexts[plaintext] = group_name_encrypted
+            plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv).decode('utf-8')
+            self._cached_groupname_plaintexts[(ciphertext, iv)] = plaintext
             return plaintext
-    
+
     def get_group_id(self, group_name: str) -> int | None:
         """Get the group id associated with a given group name.
-        
+
         Args:
             group_name (str): The name of the group to lookup.
-            
+
         Return:
             int | None: The group id (None if it does not exist)
         """
         cursor = self._db.cursor()
-        if group_name in self._cached_groupname_ciphertexts:
-            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        if group_name in self._cached_groupname_hashes:
+            name_hash = self._cached_groupname_hashes[group_name]
         else:
-            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
-            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
-        
-        cursor.execute("SELECT id FROM groups WHERE name=?", (encrypted_group_name, ))
-        result = cursor.fetchone()
-        if result is None:
+            name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
+        cursor.execute("SELECT id FROM group_names WHERE hash=?", (name_hash, ))
+        res = cursor.fetchone()
+        if res is None:
             return None
-        return int(result[0], 16)
-    
+        return int(res[0], 16)
+
     def get_members(self, group_name: str) -> list[str]:
         """Get all the members in the group with the given name.
 
         Args:
-            group_name (str): The name of the group to lookup 
+            group_name (str): The name of the group to lookup
 
         Returns:
             list[str]: A list of all the members of the group (empty if the group does not exist)
         """
         cursor = self._db.cursor()
-        if group_name in self._cached_groupname_ciphertexts:
-            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        if group_name in self._cached_groupname_hashes:
+            name_hash = self._cached_groupname_hashes[group_name]
         else:
-            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
-            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
+            name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
+            self._cached_groupname_hashes[group_name] = name_hash
+
         cursor.execute(("SELECT client_id "
                        "FROM group_members "
-                       "INNER JOIN groups "
-                       "ON groups.id = group_members.id "
-                       "WHERE groups.name = ?"), (encrypted_group_name, ))
-        
+                       "INNER JOIN group_names "
+                       "ON group_names.id = group_members.id "
+                       "WHERE group_names.hash = ?"), (name_hash, ))
+
         results = cursor.fetchall()
         return [result[0] for result in results]
-        
+
     def get_members_by_id(self, group_id: int) -> list[str]:
         """Get all the members in the group with the given id.
-        
+
         Args:
             group_id (int): The numeric group id to lookup
-        
+
         Returns:
             list[str]: A list of all the members of the group (empty if the group does not exist)
         """
@@ -134,10 +132,13 @@ class Client_DB:
             members (list[str]): The client IDs of all the members of the group
                 (can contain the owner but doesn't have to)
         """
-        encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
-        self._cached_groupname_plaintexts[encrypted_group_name] = group_name
-        self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
-        self._db.execute("INSERT INTO groups (name, id, owner_id) VALUES (?, ?, ?)", (encrypted_group_name, hex(group_id), owner_id))
+        iv = random.randrange(1, 2**128)
+        encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, iv)
+        name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
+        self._cached_groupname_plaintexts[(encrypted_group_name, iv)] = group_name
+        self._cached_groupname_hashes[group_name] = name_hash
+        self._db.execute("INSERT INTO group_names (id, hash, ciphertext, iv) VALUES (?, ?, ?, ?)", (hex(group_id), name_hash, encrypted_group_name, hex(iv)))
+        self._db.execute("INSERT INTO group_owners (id, owner_id) VALUES (?, ?)", (hex(group_id), owner_id))
         for member in members:
             self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), member))
         if owner_id not in members:
@@ -155,16 +156,17 @@ class Client_DB:
             str | None: The nickname of the associated contact record (None if there is no such contact)
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT nickname FROM nicknames WHERE id=?", (client_id, ))
+        cursor.execute("SELECT ciphertext, iv FROM nicknames WHERE id=?", (client_id, ))
         result = cursor.fetchone()
         if result is None:
             return None
-        if result[0] in self._cached_nickname_plaintexts:
-            return self._cached_nickname_plaintexts[result[0]]
+        ciphertext, iv_hex = result
+        iv = int(iv_hex, 16)
+        if (ciphertext, iv) in self._cached_nickname_plaintexts:
+            return self._cached_nickname_plaintexts[(ciphertext, iv)]
         else:
-            plaintext = aes256.decrypt_cbc(result[0], self._encryption_key, self._nickname_iv).decode('utf-8')
-            self._cached_nickname_plaintexts[result[0]] = plaintext
-            self._cached_nickname_ciphertexts[plaintext] = result[0]
+            plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv).decode('utf-8')
+            self._cached_nickname_plaintexts[(ciphertext, iv)] = plaintext
             return plaintext
 
     def close(self):
@@ -181,13 +183,12 @@ class Client_DB:
             str | None: The client ID of the associated contact record (None if there is no such contact)
         """
         cursor = self._db.cursor()
-        if nickname in self._cached_nickname_ciphertexts:
-            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_hashes:
+            nickname_hash = self._cached_nickname_hashes[nickname]
         else:
-            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
-            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
-        cursor.execute("SELECT id FROM nicknames WHERE nickname=?", (nickname_encrypted, ))
+            nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
+            self._cached_nickname_hashes[nickname] = nickname_hash
+        cursor.execute("SELECT id FROM nicknames WHERE hash=?", (nickname_hash, ))
         result = cursor.fetchone()
         if result is None:
             return None
@@ -203,7 +204,7 @@ class Client_DB:
             str | None: The client ID or None if the group does not exist
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT owner_id FROM groups WHERE id=?", (group_id, ))
+        cursor.execute("SELECT owner_id FROM group_owners WHERE id=?", (group_id, ))
         result = cursor.fetchone()
         if result is None:
             return None
@@ -247,20 +248,19 @@ class Client_DB:
             list[tuple[bytes, bool]]: A list of messages in the format (message, outgoing) where message is the
                 raw messages bytes and outgoing is a boolean which is True if the message was sent and False if it was received.
         """
-        if nickname in self._cached_nickname_ciphertexts:
-            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_hashes:
+            nickname_hash = self._cached_nickname_hashes[nickname]
         else:
-            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
-            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
+            nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
+            self._cached_nickname_hashes[nickname] = nickname_hash
         cursor = self._db.cursor()
         cursor.execute(("SELECT messages.content, messages.outgoing, messages.iv "
                        "FROM messages "
                        "INNER JOIN nicknames ON messages.sender_id = nicknames.id "
-                       "WHERE nicknames.nickname=? "
+                       "WHERE nicknames.hash=? "
                        "ORDER BY messages.timestamp "
                        "DESC"
-                       f"{' LIMIT ?' if count else ''}"), (nickname_encrypted, count) if count else (nickname_encrypted, ))
+                       f"{' LIMIT ?' if count else ''}"), (nickname_hash, count) if count else (nickname_hash, ))
 
         messages = []
         for m in cursor.fetchall():
@@ -279,44 +279,42 @@ class Client_DB:
         """Get all messages to/from a given group
 
         Args:
-            group_name (str): The name of the group to lookup 
-            count (int): The (maximum) number of messages to return  
+            group_name (str): The name of the group to lookup
+            count (int): The (maximum) number of messages to return
 
         Returns:
-            list[tuple[bytes, str]]: The last *count* messages in the form (message, sender) 
+            list[tuple[bytes, str]]: The last *count* messages in the form (message, sender)
         """
-        if group_name in self._cached_groupname_ciphertexts:
-            encrypted_group_name = self._cached_groupname_ciphertexts[group_name]
+        if group_name in self._cached_groupname_hashes:
+            group_name_hash = self._cached_groupname_hashes[group_name]
         else:
-            encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_groupname_ciphertexts[group_name] = encrypted_group_name
-            self._cached_groupname_plaintexts[encrypted_group_name] = group_name
-            
+            group_name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
+
         cursor = self._db.cursor()
-        cursor.execute(("SELECT group_messages.content, group_messages.iv, IFNULL(nicknames.nickname, group_messages.sender_id) "
+        cursor.execute(("SELECT group_messages.content, group_messages.iv, IFNULL(nicknames.ciphertext, group_messages.sender_id), nicknames.iv "
                         "FROM group_messages "
-                        "INNER JOIN groups "
-                        "ON group_messages.group_id = groups.id "
+                        "INNER JOIN group_names "
+                        "ON group_messages.group_id = group_names.id "
                         "LEFT JOIN nicknames "
                         "ON group_messages.sender_id = nicknames.id "
-                        "WHERE groups.name=? ORDER BY timestamp "
+                        "WHERE group_names.hash=? "
+                        "ORDER BY timestamp "
                         "DESC"
                         f"{' LIMIT ?' if count else ''}"),
-                       (encrypted_group_name, count) if count else (encrypted_group_name, ))
+                       (group_name_hash, count) if count else (group_name_hash, ))
         results = cursor.fetchall()
-        
+
         messages = []
         for result in results:
-            encrypted_content, aes_iv, sender = result
-            if isinstance(sender, bytes): # if it is an encrypted nickname
-                encrypted_nickname = sender
-                if encrypted_nickname in self._cached_nickname_plaintexts:
-                    sender = self._cached_nickname_plaintexts[encrypted_nickname]
+            encrypted_content, aes_iv, sender, sender_iv_hex = result
+            if sender_iv_hex is not None: # if it is an encrypted nickname
+                sender_iv = int(sender_iv_hex, 16)
+                if (sender, sender_iv) in self._cached_nickname_plaintexts:
+                    sender = self._cached_nickname_plaintexts[(sender, sender_iv)]
                 else:
-                    sender = aes256.decrypt_cbc(encrypted_nickname, self._encryption_key, self._nickname_iv).decode('utf-8')
-                    self._cached_nickname_plaintexts[encrypted_nickname] = sender
-                    self._cached_nickname_ciphertexts[sender] = encrypted_nickname
-                     
+                    sender = aes256.decrypt_cbc(sender, self._encryption_key, sender_iv).decode('utf-8')
+                    self._cached_nickname_plaintexts[(sender, sender_iv)] = sender
+
             aes_iv = int(aes_iv, 16)
             if (encrypted_content, aes_iv) in self._cached_message_plaintexts:
                 messages.append((self._cached_message_plaintexts[(encrypted_content, aes_iv)], sender))
@@ -336,16 +334,16 @@ class Client_DB:
             int: The number of messages available
         """
         cursor = self._db.cursor()
-        if nickname in self._cached_nickname_ciphertexts:
-            nickname_encrypted = self._cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_hashes:
+            nickname_hash = self._cached_nickname_hashes[nickname]
         else:
-            nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
-            self._cached_nickname_plaintexts[nickname_encrypted] = nickname
+            nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
+            self._cached_nickname_hashes[nickname] = nickname_hash
+
         cursor.execute(("SELECT COUNT (*) "
                         "FROM messages "
                         "INNER JOIN nicknames ON messages.id = nicknames.id "
-                        "WHERE nicknames.nickname=?"), (nickname_encrypted, ))
+                        "WHERE nicknames.hash=?"), (nickname_hash, ))
         return cursor.fetchone()[0]
 
     def insert_message(self, client_id: str, message: bytes, sent: bool):
@@ -366,7 +364,7 @@ class Client_DB:
 
     def insert_group_message(self, group_id: int, message: bytes, sender: str):
         """Insert a group message into the database
-        
+
         Args:
             group_id (int): The numeric group id of which the message is part
             message (bytes): The message contents
@@ -378,7 +376,7 @@ class Client_DB:
         self._db.execute("INSERT INTO group_messages (group_id, sender_id, content, timestamp, iv) VALUES (?, ?, ?, strftime('%s','now'), ?)",
                          (hex(group_id), sender, message_encrypted, hex(aes_iv)))
         self._db.commit()
-        
+
     def set_nickname(self, client_id: str, nickname: str):
         """Set the nickname for a given client id.
         The client id and nickname should be unique.
@@ -387,10 +385,11 @@ class Client_DB:
             id (str): The client ID to attach the nickname to.
             nickname (str): The nickname to attach to the client ID.
         """
-        nickname_encrypted = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-        self._cached_nickname_ciphertexts[nickname] = nickname_encrypted
-        self._cached_nickname_plaintexts[nickname_encrypted] = nickname
-        self._db.execute("INSERT INTO nicknames VALUES(?, ?)", (client_id, nickname_encrypted))
+        nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
+        self._cached_nickname_hashes[nickname] = nickname_hash
+        nickname_iv = random.randrange(1, 2**128)
+        nickname_ciphertext = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, nickname_iv)
+        self._db.execute("INSERT INTO nicknames (id, hash, ciphertext, iv ) VALUES(?, ?, ?, ?)", (client_id, nickname_hash, nickname_ciphertext, hex(nickname_iv)))
         self._db.commit()
 
     def change_nickname(self, old_nickname: str, new_nickname: str):
@@ -405,29 +404,25 @@ class Client_DB:
         Raises:
             sqlite3.IntegrityError: The new nickname is already in use.
         """
-        if old_nickname in self._cached_nickname_ciphertexts:
-            encrypted_old_nickname = self._cached_nickname_ciphertexts[old_nickname]
+        if old_nickname in self._cached_nickname_hashes:
+            old_nickname_hash = self._cached_nickname_hashes[old_nickname]
         else:
-            encrypted_old_nickname = aes256.encrypt_cbc(old_nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[old_nickname] = encrypted_old_nickname
-            self._cached_nickname_plaintexts[encrypted_old_nickname] = old_nickname
+            old_nickname_hash = sha256.hash_hex(old_nickname.encode('utf-8') + self._name_salt)
+            self._cached_nickname_hashes[old_nickname] = old_nickname_hash
 
-        if new_nickname in self._cached_nickname_ciphertexts:
-            encrypted_new_nickname = self._cached_nickname_ciphertexts[new_nickname]
-        else:
-            encrypted_new_nickname = aes256.encrypt_cbc(new_nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[new_nickname] = encrypted_new_nickname
-            self._cached_nickname_plaintexts[encrypted_new_nickname] = new_nickname
-
-        self._db.execute("UPDATE nicknames SET nickname=? WHERE nickname=?", (encrypted_new_nickname, encrypted_old_nickname))
+        new_nickname_hash = sha256.hash_hex(new_nickname.encode('utf-8') + self._name_salt)
+        new_nickname_iv = random.randrange(1, 2**128)
+        new_nickname_ciphertext = aes256.encrypt_cbc(new_nickname.encode('utf-8'), self._encryption_key, new_nickname_iv)
+        self._db.execute("UPDATE nicknames SET hash=?, ciphertext=?, iv=? WHERE hash=?",
+                         (new_nickname_hash, new_nickname_ciphertext, hex(new_nickname_iv), old_nickname_hash))
         self._db.commit()
 
     def change_group_id(self, old_id: int, new_id: int):
         """Update the group ID of a group
 
         Args:
-            old_id (int): The ID of the group to update 
-            new_id (int): The new ID of the group 
+            old_id (int): The ID of the group to update
+            new_id (int): The new ID of the group
         """
         self._db.execute("UPDATE groups SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
         self._db.execute("UPDATE group_messages SET group_id=? WHERE group_id=?", (hex(new_id), hex(old_id)))
@@ -440,42 +435,42 @@ class Client_DB:
         Args:
             group_name (str): The name of the group to delete
         """
-        if group_name in self._cached_groupname_ciphertexts:
-            encrypted_groupname = self._cached_groupname_ciphertexts[group_name]
+        if group_name in self._cached_groupname_hashes:
+            groupname_hash = self._cached_groupname_hashes[group_name]
         else:
-            encrypted_groupname = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_groupname_ciphertexts[group_name] = encrypted_groupname
-            self._cached_groupname_plaintexts[encrypted_groupname] = group_name
-        self._db.execute("DELETE FROM group_messages WHERE group_id IN (SELECT id FROM groups WHERE name=?)", (encrypted_groupname, ))
-        self._db.execute("DELETE FROM group_members WHERE id IN (SELECT id FROM groups WHERE name=?)", (encrypted_groupname))
-        self._db.execute("DELETE FROM groups WHERE name=?", (encrypted_groupname, ))
+            groupname_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
+            self._cached_groupname_hashes[group_name] = groupname_hash
+        self._db.execute("DELETE FROM group_messages WHERE group_id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
+        self._db.execute("DELETE FROM group_members WHERE id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
+        self._db.execute("DELETE FROM group_owners WHERE id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
+        self._db.execute("DELETE FROM group_names WHERE hash=?", (groupname_hash, ))
         self._db.commit()
-    
+
     def delete_group_by_group_id(self, group_id: int):
         """Delete the group with a given group id
 
         Args:
-            group_id (int): The numeric group id of the group to delete 
+            group_id (int): The numeric group id of the group to delete
         """
         self._db.execute("DELETE FROM group_messages WHERE group_id=?", (hex(group_id), ))
         self._db.execute("DELETE FROM group_members WHERE id=?", (hex(group_id), ))
+        self._db.execute("DELETE FROM group_owners WHERE id=?", (hex(group_id), ))
         self._db.execute("DELETE FROM groups WHERE id=?", (hex(group_id), ))
         self._db.commit()
 
     def delete_contact_by_nickname(self, nickname: str):
         """Delete the contact entry and all messages associated with a given nickname.
-        
+
         Args:
             nickname (str): The nickname of the contact to delete
         """
-        if nickname in self._cached_nickname_ciphertexts:
-            encrypted_nickname = self._cached_nickname_ciphertexts[nickname]
+        if nickname in self._cached_nickname_hashes:
+            nickname_hash = self._cached_nickname_hashes[nickname]
         else:
-            encrypted_nickname = aes256.encrypt_cbc(nickname.encode('utf-8'), self._encryption_key, self._nickname_iv)
-            self._cached_nickname_ciphertexts[nickname] = encrypted_nickname
-            self._cached_nickname_plaintexts[encrypted_nickname] = nickname
-        self._db.execute("DELETE FROM messages WHERE sender_id IN (SELECT id FROM nicknames WHERE nickname=?)", (encrypted_nickname, ))
-        self._db.execute("DELETE FROM nicknames WHERE nickname=?", (encrypted_nickname, ))
+            nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
+            self._cached_nickname_hashes[nickname] = nickname_hash
+        self._db.execute("DELETE FROM messages WHERE sender_id IN (SELECT id FROM nicknames WHERE hash=?)", (nickname_hash, ))
+        self._db.execute("DELETE FROM nicknames WHERE hash=?", (nickname_hash, ))
         self._db.commit()
 
     def delete_contact_by_id(self, client_id: str):
@@ -527,15 +522,15 @@ class Client_DB:
             list[str]: The nicknames of every known contact.
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT nickname FROM nicknames")
+        cursor.execute("SELECT ciphertext, iv FROM nicknames")
         nicknames = []
-        for nickname in cursor.fetchall():
-            if nickname[0] in self._cached_nickname_plaintexts:
-                nicknames.append(self._cached_nickname_plaintexts[nickname[0]])
+        for ciphertext, iv_hex in cursor.fetchall():
+            iv = int(iv_hex, 16)
+            if (ciphertext, iv) in self._cached_nickname_plaintexts:
+                nicknames.append(self._cached_nickname_plaintexts[(ciphertext, iv)])
             else:
-                plaintext = aes256.decrypt_cbc(nickname[0], self._encryption_key, self._nickname_iv).decode('utf-8')
-                self._cached_nickname_ciphertexts[plaintext] = nickname[0]
-                self._cached_nickname_plaintexts[nickname[0]] = plaintext
+                plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv).decode('utf-8')
+                self._cached_nickname_plaintexts[(ciphertext, iv)] = plaintext
                 nicknames.append(plaintext)
         return nicknames
 
@@ -543,17 +538,17 @@ class Client_DB:
         """Get a list of all group names.
 
         Returns:
-            list[str]: The names of all groups of which you are part. 
+            list[str]: The names of all groups of which you are part.
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT name FROM groups")
+        cursor.execute("SELECT ciphertext, iv FROM group_names")
         names = []
-        for name in cursor.fetchall():
-            if name[0] in self._cached_groupname_plaintexts:
-                names.append(self._cached_groupname_plaintexts[name[0]])
+        for ciphertext, iv_hex in cursor.fetchall():
+            iv = int(iv_hex, 16)
+            if (ciphertext, iv) in self._cached_groupname_plaintexts:
+                names.append(self._cached_groupname_plaintexts[(ciphertext, iv)])
             else:
-                plaintext = aes256.decrypt_cbc(name[0], self._encryption_key, self._nickname_iv).decode('utf-8')
-                self._cached_groupname_ciphertexts[plaintext] = name[0]
-                self._cached_groupname_plaintexts[name[0]] = plaintext
+                plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv).decode('utf-8')
+                self._cached_groupname_plaintexts[(ciphertext, iv)] = plaintext
                 names.append(plaintext)
         return names

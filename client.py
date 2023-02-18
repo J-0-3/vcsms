@@ -74,7 +74,7 @@ class Application:
         """
         self._stdscr = stdscr
         self._client = client
-        self._id = client.get_id()
+        self._id = client.id
         self._new_message = {}
         self._running = False
         self.__focused_user = ""
@@ -125,7 +125,7 @@ class Application:
     def _draw_top_bar(self):
         """Draw the top bar which displays the user's client ID"""
         self._top_bar.clear()
-        self._top_bar.addstr(1, 1, f"Your ID: {self._client.get_id()}")
+        self._top_bar.addstr(1, 1, f"Your ID: {self._client.id}")
         self._top_bar.border()
         self._top_bar.refresh()
 
