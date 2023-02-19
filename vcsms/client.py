@@ -122,14 +122,11 @@ class Client:
             master_password (str): The master password used to encrypt data at rest.
             logger (Logger): An instance of vcsms.logger.Logger used to log all application events.
         """
-        self._ip = ip
-        self._port = port
         self._id = ""
-        self._server_fingerprint = fingerprint
-        self._server = None
+        self._server = ServerConnection(ip, port, fingerprint, logger)
         self._app_dir = application_directory
-        self._pub = ()
-        self._priv = ()
+        self._pub = (0, 0)
+        self._priv = (0, 0)
         self._dhke_group = dhke.group14_2048
         self._messages = {}
         self._key_requests = {}
@@ -176,12 +173,12 @@ class Client:
         contacts = [u for u in zip(users, [False] * len(users))] + [g for g in zip(groups, [True] * len(groups))]
         db.close()
         return contacts
-       
+
     def receive(self) -> tuple[str, str, bytes]:
         """Block until a new message is available and then return it.
 
         Returns:
-            tuple[str, str, bytes]: The message sender, group name and contents 
+            tuple[str, str, bytes]: The message sender, group name and contents
         """
         return self._message_queue.pop()
 
@@ -226,8 +223,7 @@ class Client:
             raise NickNameInUseException(new_name)
         if db.get_id(old_name):
             db.change_nickname(old_name, new_name)
-        elif db.get_group_id(old_name):
-            gid = db.get_group_id(old_name)
+        elif gid := db.get_group_id(old_name):
             members = db.get_members(old_name)
             for member in members:
                 signature_data = f"RENAME{new_name}{gid}{member}".encode('utf-8')
@@ -241,7 +237,7 @@ class Client:
                 encrypted_group_name = rsa.encrypt(new_name.encode('utf-8'), *key)
                 message = self._message_parser.construct_message(member, "RenameGroup", gid, encrypted_group_name, signature)
                 self._server.send(message)
-            db.rename_group(db.get_group_id(old_name), new_name)
+            db.rename_group(gid, new_name)
         db.close()
 
     def delete_contact(self, name: str):
@@ -253,8 +249,7 @@ class Client:
         db = self._db_connect()
         if db.get_id(name):
             db.delete_contact_by_nickname(name)
-        elif db.get_group_id(name):
-            gid = db.get_group_id(name)
+        elif gid:= db.get_group_id(name):
             for member in db.get_members(name):
                 signature_data = f"LEAVE{gid}{member}".encode('utf-8')
                 signature = signing.sign(signature_data, self._priv)
@@ -284,7 +279,7 @@ class Client:
             for message in messages_in_single_user_form:
                 data, outgoing = message
                 messages.append((data, self._id if outgoing else name))
-        
+
         db.close()
         return messages
 
@@ -318,8 +313,7 @@ class Client:
         self._messages[index] = {
             "client_id": recipient_id,
             "dh_private": dh_priv,
-            "encryption_key": 0,
-            "data": message.decode('latin1'),  # needs to be JSON serializable
+            "data": message.decode('latin1'), # needs to be JSON serialisable
             "group": 0
         }
         message = self._message_parser.construct_message(
@@ -418,7 +412,7 @@ class Client:
             if not self._check_master_key():
                 self._logger.log("Incorrect master key attempt.", 0)
                 raise IncorrectMasterKeyException()
-            self._logger.log("Successful login", 2)  
+            self._logger.log("Successful login", 2)
         else:
             self._logger.log("Generating master key challenge", 2)
         self._create_master_key_test()
@@ -433,7 +427,7 @@ class Client:
             with open(os.path.join(self._app_dir, "names.salt"), 'w+') as f:
                 self._name_salt = random.randbytes(256)
                 salt_iv = random.randrange(1, 2**128)
-                salt_encrypted = aes256.encrypt_cbc(self._name_salt, self._local_encryption_key, salt_iv) 
+                salt_encrypted = aes256.encrypt_cbc(self._name_salt, self._local_encryption_key, salt_iv)
                 salt_iv_hex = hex(salt_iv)[2:]
                 salt_encrypted_hex = salt_encrypted.hex()
                 f.write(f"{salt_iv_hex}:{salt_encrypted_hex}")
@@ -451,7 +445,6 @@ class Client:
             self._pub, self._priv = keys.generate_keys(public_key_path, private_key_path, self._local_encryption_key)
 
         self._id = keys.fingerprint(self._pub)
-        self._server = ServerConnection(self._ip, self._port, self._server_fingerprint, self._logger)
         self._logger.log("Connecting to server.", 2)
         try:
             self._server.connect(self._pub, self._priv)
@@ -476,7 +469,7 @@ class Client:
         """Request a user's public key from the server.
 
         Args:
-            client_id (str): The client ID to request. 
+            client_id (str): The client ID to request.
         """
         request_index = random.randrange(1, 2**64)
         while request_index in self._key_requests:
@@ -586,6 +579,7 @@ class Client:
                 data)
         except MessageParseException as parse_exception:
             self._logger.log(str(parse_exception), 1)
+            return
 
         response = self._message_parser.handle(
             sender, message_type, message_values)
@@ -594,10 +588,10 @@ class Client:
 
     # message type handlers
 
-    def _handler_create_group(self, sender: str, encrypted_group_name: bytes, signature: bytes, 
+    def _handler_create_group(self, sender: str, encrypted_group_name: bytes, signature: bytes,
             group_id: int, members: list) -> None | tuple[str, tuple]:
         """Handler function for the CreateGroup message type
-        
+
         Args:
             sender (str): The client ID which sent the message
             encrypted_group_name (bytes): The name of the group encrypted with my RSA public key.
@@ -661,9 +655,9 @@ class Client:
             if sender in members:
                 signature_data = f"LEAVE{group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
-                    self._request_key(sender) 
+                    self._request_key(sender)
                     if not self._await_key(sender, 60, lambda: None):
-                        self._logger.log(f"Could not get public key of {sender}: timeout")
+                        self._logger.log(f"Could not get public key of {sender}: timeout", 2)
                         return
                 key = db.get_key(sender)
                 if signing.verify(signature_data, signature, key):
@@ -702,7 +696,7 @@ class Client:
                         name_decrypted = f"{name_decrypted} ({postfix})"
                         postfix += 1
                     old_name = db.get_group_name(group_id)
-                    db.rename_group(group_id, name_decrypted) 
+                    db.rename_group(group_id, name_decrypted)
                     self._logger.log("Renamed group {group_id}", 2)
                     self._message_queue.push(("RENAMEGROUP", (old_name, name_decrypted)))
                     return None
@@ -710,7 +704,7 @@ class Client:
             return "NotAllowed", ("RenameGroup", )
         return "NoSuchGroup", (group_id, )
 
-    def _handler_group_id_in_use(self, sender: str, group_id: int, signature: bytes) -> tuple[str, tuple]:
+    def _handler_group_id_in_use(self, sender: str, group_id: int, signature: bytes) -> tuple[str, tuple] | None:
         """Handler function for the GroupIDInUse message type.
 
         Args:
@@ -780,7 +774,7 @@ class Client:
             if group_name:
                 signature_data = f"CHANGEID{old_id}{new_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
-                    self._request_key(sender) 
+                    self._request_key(sender)
                     if not self._await_key(sender, 60, lambda: None):
                         self._logger.log("Unable to verify group ID change request. Client public key not received.", 2)
                         return None
@@ -790,15 +784,15 @@ class Client:
                         response_signature = signing.sign(response_signature_data, self._priv)
                         self._logger.log(f"{sender} tried to change a group ID to one already in use.", 3)
                         return "GroupIDInUse", (new_id, response_signature)
-                    db.change_group_id(old_id, new_id) 
+                    db.change_group_id(old_id, new_id)
                     self._logger.log(f"Changed group ID {old_id} to {new_id}", 3)
                     return None
                 self._logger.log(f"Invalid new group info signature from {sender}.", 2)
-                return "InvalidSignature", (old_id)
+                return "InvalidSignature", (old_id, )
             self._logger.log(f"{sender} tried to change the ID of a non-existent group.", 2)
             return "NoSuchGroup", (old_id, )
         self._logger.log(f"Unauthorised group ID change request.", 2)
-        return "NotAllowed", ("ChangeGroupID")
+        return "NotAllowed", ("ChangeGroupID", )
 
     def _handler_key_found(self, sender: str, request_index: int, exponent: int, modulus: int) -> None | tuple:
         """Handler function for the KeyFound message type.
@@ -855,8 +849,8 @@ class Client:
         self._logger.log(f"Received unauthorised key request response.", 2)
         return "NotAllowed", ("KeyNotFound", )
 
-    def _handler_new_message(self, sender: str, message_index: int, 
-            sender_dh_pub: int, sender_dh_sig: bytes) -> tuple[str, tuple]:
+    def _handler_new_message(self, sender: str, message_index: int,
+            sender_dh_pub: int, sender_dh_sig: bytes) -> tuple[str, tuple] | None:
         """Handler function for the NewMessage message type.
 
         Args:
@@ -884,7 +878,6 @@ class Client:
             if not self._await_key(sender, 60, lambda: None):
                 db.close()
                 return None
-            # return "ResendAuthPacket", (message_index, )
 
         sender_rsa = db.get_key(sender)
         if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
@@ -903,14 +896,11 @@ class Client:
 
         self._messages[message_index] = {
             "client_id": sender,
-            "dh_private": dh_priv,
-            "encryption_key": encryption_key,
-            "data": '',
-            "group": 0 }
+            "encryption_key": encryption_key }
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
-    def _handler_message_accept(self, sender: str, message_index: int, 
-            sender_dh_pub: int, sender_dh_sig: bytes) -> tuple[str, tuple]:
+    def _handler_message_accept(self, sender: str, message_index: int,
+            sender_dh_pub: int, sender_dh_sig: bytes) -> tuple[str, tuple] | None:
         """Handler for the MessageAccept message type.
 
         Args:
@@ -995,14 +985,14 @@ class Client:
             except JSONDecodeError:
                 self._logger.log(f"Malformed message data from {sender}", 1)
                 return "MessageDataMalformed", (message_index, )
-            
+
             try:
                 group = message_data['group']
                 data = message_data['data'].encode('latin1')
             except KeyError:
                 self._logger.log(f"Malformed message data from {sender}", 1)
                 return "MessageDataMalformed", (message_index, )
-                
+
             db = self._db_connect()
             group_name = db.get_group_name(group) or ""
             sender_name = db.get_nickname(sender) or sender
@@ -1062,7 +1052,7 @@ class Client:
         """
         self._logger.log(f"{sender} sent a message of unknown type {message_type} with values {values}", 2)
         return "UnknownMessageType", (message_type, )
-    
+
     def _handler_default(self, sender: str, message_type: str, values: list):
         """Default handler function.
 

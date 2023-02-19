@@ -2,7 +2,7 @@ import time
 from .cryptography import rsa, sha256, dhke
 from .cryptography.exceptions import DecryptionFailureException
 
-def sign(data: bytes, priv_key: tuple[int, int], ttl: int = 60) -> bytes:
+def sign(data: bytes, priv_key: tuple, ttl: int = 60) -> bytes:
     """Sign some data using a given RSA private key.
 
     Args:
