@@ -7,7 +7,6 @@ import re
 import time
 import json
 from json.decoder import JSONDecodeError
-from sqlite3 import IntegrityError as sqliteIntegrityError
 from typing import Callable
 
 from .queue import Queue
@@ -572,10 +571,10 @@ class Client:
             if self._server.new_msg():
                 msg = self._server.read()
                 t_process = threading.Thread(
-                    target=self._msg_process_thread, args=(msg,))
+                    target=self._process_message, args=(msg,))
                 t_process.start()
 
-    def _msg_process_thread(self, data: bytes):
+    def _process_message(self, data: bytes):
         """The function run by the processing thread for each incoming message.
         Parses the message data and runs the corresponding handler function.
 

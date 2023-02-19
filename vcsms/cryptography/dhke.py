@@ -37,15 +37,3 @@ def calculate_shared_key(private_key: int, peer_public_key: int, group: tuple) -
         int: The established shared secret
     """
     return pow(peer_public_key, private_key, group[1])
-
-
-if __name__ == "__main__":
-    import random
-    a_priv = random.randrange(1, group18_8192[1])
-    b_priv = random.randrange(1, group18_8192[1])
-
-    a_pub = generate_public_key(a_priv, group18_8192)
-    b_pub = generate_public_key(b_priv, group18_8192)
-
-    print(f"a calculates: {hex(calculate_shared_key(a_priv, b_pub, group18_8192))}")
-    print(f"b calculates: {hex(calculate_shared_key(b_priv, a_pub, group18_8192))}")

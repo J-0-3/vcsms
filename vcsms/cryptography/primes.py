@@ -60,14 +60,3 @@ def is_prime(x: int):
     if miller_rabin_primality_test(x, 100):
         return True
     return False
-
-
-if __name__ == "__main__":
-    count = 1
-    while True:
-        candidate = random.randrange(1, 2**2048)
-        if is_prime(candidate):
-            print(f"prime found in {count} attempts")
-            print(candidate)
-            break
-        count += 1

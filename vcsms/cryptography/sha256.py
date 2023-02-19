@@ -110,14 +110,3 @@ def hash_hex(val: bytes) -> str:
     while len(hex_hash) < 64:
         hex_hash = "0" + hex_hash
     return hex_hash
-
-
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) < 2:
-        print(hex(hash(input().encode()))[2:])
-    else:
-        for file in sys.argv[1:]:
-            with open(file, "rb") as data:
-                print(hex(hash(data.read()))[2:])

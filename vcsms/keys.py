@@ -75,8 +75,6 @@ def fingerprint(key: tuple[int, int], fp_length: int = 32) -> str:
     """
     if fp_length > 64 or fp_length <= 1:
         raise ValueError(f"Fingerprint length must not be greater than 64 or less than 1. ({fp_length}) provided.")
-    hash = sha256.hash(hex(key[0])[2:].encode() + hex(key[1])[2:].encode())
-    hex_fp = hex(hash)[2:fp_length + 2]
-    while len(hex_fp) < fp_length:
-        hex_fp = "0" + hex_fp
-    return hex_fp
+    serialised_key = hex(key[0])[2:].encode() + hex(key[1])[2:].encode()
+    fp = sha256.hash_hex(serialised_key)[2:fp_length + 2]
+    return fp
