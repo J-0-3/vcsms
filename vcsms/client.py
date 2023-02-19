@@ -663,7 +663,7 @@ class Client:
                 signature_data = f"LEAVE{group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
                     self._request_key(sender) 
-                    if not self._await_key(sender):
+                    if not self._await_key(sender, 60, lambda: None):
                         self._logger.log(f"Could not get public key of {sender}: timeout")
                         return
                 key = db.get_key(sender)
@@ -693,7 +693,7 @@ class Client:
                 signature_data = f"RENAME{name_decrypted}{group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
                     self._request_key(sender)
-                    if not self._await_key(sender):
+                    if not self._await_key(sender, 60, lambda: None):
                         self._logger.log("Could not verify group rename signature. Public key timeout.", 2)
                         return None
                 key = db.get_key(sender)
