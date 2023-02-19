@@ -936,7 +936,9 @@ class Client:
                 self._logger.log(f"Invalid public key signature from {sender}", 1)
                 return "InvalidSignature", (message_index, )
             db.close()
-
+            if "dh_private" not in self._messages[message_index]:
+                self._logger.log("{sender} attempted to accept a message that they sent.", 2)
+                return "NotAllowed", ("MessageAccept", )
             dh_priv = self._messages[message_index]["dh_private"]
             shared_secret = dhke.calculate_shared_key(
                 dh_priv, sender_dh_pub, self._dhke_group)
@@ -974,6 +976,9 @@ class Client:
             return "NoSuchIndex", (message_index, )
 
         if sender == self._messages[message_index]["client_id"]:
+            if encryption_key not in self._messages[message_index]:
+                self._logger.log(f"{sender} attempted to send message data for a message I am sending.", 2)
+                return "NotAllowed", ("MessageData", )
             encryption_key = self._messages[message_index]["encryption_key"]
             try:
                 plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
