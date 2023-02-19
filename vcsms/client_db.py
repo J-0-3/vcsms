@@ -35,7 +35,7 @@ class Client_DB:
         self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text primary key unique, hash text unique, ciphertext blob, iv text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS messages (id integer primary key autoincrement, sender_id text, content blob, outgoing integer, timestamp integer, iv text unique)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_owners (id text primary key unique, owner_id text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_names (id text unique, hash text unique, ciphertext blob, iv text unique)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS group_names (id text primary key unique, hash text unique, ciphertext blob, iv text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (id integer primary key autoincrement, group_id text, sender_id text, content blob, timestamp integer, iv text unique)")
         self._db.commit()
@@ -145,6 +145,31 @@ class Client_DB:
             self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), owner_id))
         self._db.commit()
 
+    def remove_group_member(self, group_id: int, member: str):
+        """Remove the specified from the specified group.
+        
+        Args:
+            group_id (int): The numeric ID of the group to operate on.
+            member (str): The client ID of the member to remove.
+        """
+        self._db.execute("DELETE FROM group_members WHERE id=? AND client_id=?", (hex(group_id), member))
+        self._db.commit()
+
+    def rename_group(self, group_id: int, name: str):
+        """Change the name of a group.
+
+        Args:
+            group_id (int): The numeric ID of the group to rename.
+            name (str): The new name of the group.
+        """
+        name_hash = sha256.hash_hex(name.encode('utf-8') + self._name_salt)
+        name_iv = random.randrange(1, 2*128) 
+        name_ciphertext = aes256.encrypt_cbc(name.encode('utf-8'), self._encryption_key, name_iv)
+        self._cached_groupname_hashes[name] = name_hash
+        self._cached_groupname_plaintexts[(name_ciphertext, name_iv)] = name
+        self._db.execute("UPDATE group_names SET hash=?, iv=?, ciphertext=? WHERE id=?", 
+            (name_hash, hex(name_iv), name_ciphertext, hex(group_id)))
+        self._db.commit()
 
     def get_nickname(self, client_id: str) -> str | None:
         """Get the nickname associated with a given client id.

@@ -8,7 +8,8 @@ from .queue import Queue
 from .server_db import Server_DB
 from .logger import Logger
 from .cryptography import dhke, sha256, aes256, utils
-from .non_stream_socket import NonStreamSocket
+from .cryptography.exceptions import DecryptionFailureException
+from .improved_socket import ImprovedSocket
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
 from .exceptions.server import IDCollisionException
@@ -23,14 +24,14 @@ OUTGOING_MESSAGE_TYPES = {
     "KeyFound": ([int, int, int], [10, 16, 16]),
     "KeyNotFound": ([int], [10]),
     "InvalidIV": (),
-    "MalformedCiphertext": (),
-    "MalformedMessage": ()
+    "CiphertextMalformed": (),
+    "MessageMalformed": ()
 }
 
 
 class Server:
     """A VCSMS messaging server. Provides messaging capabilities to clients."""
-    def __init__(self, addr: str, port: int, keypair: tuple[tuple[int, int], tuple[int, int]], db_path: str, pubkey_directory: str, logger: Logger):
+    def __init__(self, addr: str, port: int, keypair: tuple, db_path: str, pubkey_directory: str, logger: Logger):
         """Initialise a VCSMS server.
 
         Args:
@@ -45,37 +46,38 @@ class Server:
         self._port = port
         self._pub = keypair[0]
         self._priv = keypair[1]
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._dhke_group = dhke.group14_2048
         self._client_outboxes = {}
-        self._sockets = {}
+        self._client_sockets = {}
         self._db_path = db_path
         self._pubkey_path = pubkey_directory
         self._logger = logger
         response_map = {
             "GetKey": self._handler_get_key,
-            "Quit": self._handler_quit
+            "Quit": self._handler_quit,
+            "default": self._handler_default
         }
         self._message_parser = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, response_map)
 
     def run(self):
         """Begin listening for and processing connections from clients. This should be the first method that is called by this class."""
-        self._sock.bind((self._addr, self._port))
-        self._sock.listen(30)
+        l_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        l_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        l_sock.bind((self._addr, self._port))
+        l_sock.listen(30)
         db = self._db_connect()
         db.setup_db()
         db.close()
         self._logger.log(f"Running on {self._addr}:{self._port}", 0)
         while True:
-            conn, addr = self._sock.accept()
+            conn, addr = l_sock.accept()
             self._logger.log(f"New connection from: {addr}", 2)
-            ns_sock = NonStreamSocket(conn)
+            ns_sock = ImprovedSocket(conn)
             ns_sock.run()
             t_connect = threading.Thread(target=self._handshake, args=(ns_sock,))
             t_connect.start()
 
-    def send(self, client: str, message: bytes):
+    def _send(self, client: str, message: bytes):
         """Send a message to a specified client ID.
 
         Args:
@@ -87,7 +89,7 @@ class Server:
             self._client_outboxes[client] = Queue()
         self._client_outboxes[client].push(message)
 
-    def _handshake(self, client: NonStreamSocket):
+    def _handshake(self, client: ImprovedSocket):
         """Handshake with a socket to establish its client ID, setup an encrypted connection and begin routing messages to/from it.
 
         Args:
@@ -191,7 +193,7 @@ class Server:
             outbox = Queue()
             self._client_outboxes[c_id] = outbox
 
-        self._sockets[c_id] = client
+        self._client_sockets[c_id] = client
         t_in = threading.Thread(target=self._in_thread, args=(client, encryption_key, c_id))
         t_out = threading.Thread(target=self._out_thread, args=(client, outbox, encryption_key))
         t_in.start()
@@ -199,7 +201,7 @@ class Server:
         db.close()
 
     # thread methods
-    def _in_thread(self, client: NonStreamSocket, encryption_key: int, client_id: str):
+    def _in_thread(self, client: ImprovedSocket, encryption_key: int, client_id: str):
         """A function to be run by a thread which parses, handles if necessary, and routes incoming messages from a given client.
 
         Args:
@@ -207,48 +209,55 @@ class Server:
             encryption_key (int): The encryption key to use for all messages exchanged with the client.
             client_id (str): The client ID associated with this socket.
         """
-        while client.connected():
-            if client.new():
+        while client.connected:
+            if client.new:
                 raw = client.recv()
                 try:
                     aes_iv, ciphertext = raw.decode().split(':', 1)
                 except ValueError:
                     self._logger.log(f"Malformed message from {client_id}", 2)
-                    error_msg = self._message_parser.construct_message("0", "MalformedCiphertext")
-                    self.send(client_id, error_msg)
+                    error_msg = self._message_parser.construct_message("0", "CiphertextMalformed")
+                    self._send(client_id, error_msg)
                     continue
                 try:
                     aes_iv = int(aes_iv, 16)
                 except ValueError:
                     self._logger.log(f"Invalid initialization vector {aes_iv}", 2)
                     error_msg = self._message_parser.construct_message("0", "InvalidIV")
+                    self._send(client_id, error_msg)
                     continue
-                data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
+                try:
+                    data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
+                except DecryptionFailureException:
+                    self._logger.log(f"Could not decrypt message from {client_id}", 2)
+                    error_msg = self._message_parser.construct_message("0", "MessageDecryptionFailure")
+                    self._send(client_id, error_msg)
+                    continue
                 try:
                     recipient, message_type, message_values = self._message_parser.parse_message(data)
                 except MessageParseException as parse_exception:
                     self._logger.log(str(parse_exception), 2)
-                    error_msg = self._message_parser.construct_message("0", "MalformedMessage") 
-                    self.send(client_id, error_msg)
+                    error_msg = self._message_parser.construct_message("0", "MessageMalformed") 
+                    self._send(client_id, error_msg)
                     continue
 
-                self._logger.log(f"{message_type} {client_id} -> {recipient}", 3)
                 if recipient == "0":
                     response = self._message_parser.handle(client_id, message_type, message_values, "0")
                     if response:
-                        self.send(client_id, response)
+                        self._send(client_id, response)
                 else:
+                    self._logger.log(f"{message_type} {client_id} -> {recipient}", 4)
                     to_send = self._message_parser.construct_message(client_id, message_type, *message_values)
-                    self.send(recipient, to_send)
+                    self._send(recipient, to_send)
 
         db = self._db_connect()
         db.user_logout(client_id)
         db.close()
         self._logger.log(f"User {client_id} closed the connection", 1)
-        self._sockets.pop(client_id)
+        self._client_sockets.pop(client_id)
 
     @staticmethod
-    def _out_thread(sock: NonStreamSocket, outbox: Queue, encryption_key: int):
+    def _out_thread(client: ImprovedSocket, outbox: Queue, encryption_key: int):
         """A function to be run by a thread which constantly reads messages from
         the outbox queue, encrypts them, and sends them to the given client socket.
 
@@ -259,27 +268,26 @@ class Server:
             encryption_key (int): The encryption key to for all messages exchanged
                 with the client.
         """
-        while sock.connected():
+        while client.connected:
             if not outbox.empty():
                 message = outbox.pop()
                 aes_iv = random.randrange(1, 2 ** 128)
                 ciphertext = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex()
-                sock.send(hex(aes_iv).encode() + b':' + ciphertext.encode('utf-8'))
+                client.send(hex(aes_iv).encode() + b':' + ciphertext.encode('utf-8'))
 
     # message type handler methods
-    def _handler_get_key(self, sender: str, values: list) -> tuple[str, tuple]:
+    def _handler_get_key(self, sender: str, request_index: int, target_id: str) -> tuple[str, tuple]:
         """Handler function for the GetKey message type.
 
         Args:
             sender (str): The client ID which sent the message.
-            values (list): The parameters of the message (target ID (str))
+            request_index (int): The index of the request on the client side.
+            target_id (str): The client ID being requested.
 
         Returns:
             tuple[str, tuple]: KeyFound if successful.
                 KeyNotFound: The public key for the requested user could not be found.
         """
-        request_index, target_id = values
-
         self._logger.log(f"User {sender} requested key for user {target_id}", 3)
         db = self._db_connect()
         if db.user_known(target_id):
@@ -292,14 +300,23 @@ class Server:
         db.close()
         return "KeyNotFound", (request_index, )
 
-    def _handler_quit(self, sender: str, _: list):
+    def _handler_quit(self, sender: str):
         """Handler function for the Quit message type.
 
         Args:
             sender (str): The client ID which sent the message.
         """
         self._logger.log(f"User {sender} requested a logout", 1)
-        self._sockets[sender].close()
+        self._client_sockets[sender].close()
+
+    def _handler_default(self, sender: str, message_type: str, values: list):
+        """Default handler for messages.
+        Args:
+            sender (str): The client ID which sent the message.
+            message_type (str): The message type they sent.
+            values (list): The parameters included in the message.
+        """
+        self._logger.log(f"{sender} sent message of type {message_type}. No action taken.", 3)
 
     def _db_connect(self) -> Server_DB:
         """Get a connection to the server database.

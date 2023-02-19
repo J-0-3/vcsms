@@ -5,7 +5,7 @@ from .queue import Queue
 
 from . import keys
 from . import signing
-from .non_stream_socket import NonStreamSocket
+from .improved_socket import ImprovedSocket
 from .logger import Logger
 from .cryptography import dhke, sha256, utils, aes256
 from .cryptography.exceptions import DecryptionFailureException
@@ -25,7 +25,7 @@ class ServerConnection:
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._socket = NonStreamSocket(s)
+        self._socket = ImprovedSocket(s)
         self._ip = ip
         self._port = port
         self._fp = fp
@@ -159,7 +159,7 @@ class ServerConnection:
     def _in_thread(self):
         """A function to be run by a thread which receives, parses and decrypts messages from the server."""
         while self._connected:
-            if self._socket.new():
+            if self._socket.new:
                 data = self._socket.recv()
                 try:
                     iv, data = data.split(b':')

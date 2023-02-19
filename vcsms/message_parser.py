@@ -199,7 +199,7 @@ class MessageParser:
             tuple[str, str, list]: The sender, message type and parameters
                 in the correct types.
         """
-        if re.fullmatch(b'^(([0-9a-fA-F]{24})|0):[A-z]+(:[A-Fa-f0-9]+)*:[A-Fa-f0-9]*$', data) is None:
+        if re.fullmatch(b'^(([0-9a-fA-F]{32})|0):[A-z]+(:[A-Fa-f0-9]+)*:[A-Fa-f0-9]*$', data) is None:
             raise MalformedMessageException(data)
         sender, message_type, payload = data.split(b':', 2)
         sender = sender.decode('utf-8')
@@ -225,7 +225,7 @@ class MessageParser:
             bytes: The response message as raw bytes.
         """
         if message_type in self._response_map:
-            response = self._response_map[message_type](sender, values)
+            response = self._response_map[message_type](sender, *values)
             if response:
                 if override_recipient_field:
                     return self.construct_message(override_recipient_field, response[0], *(response[1]))

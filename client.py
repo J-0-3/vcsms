@@ -80,7 +80,7 @@ class Application:
         self.__focused_user = ""
         self._focused_user_index = 0
         self._panel_sizes = {}
-        self._contacts = client.get_contacts()
+        self._contacts = client.contacts
         if len(self._contacts) > 0:
             self.__focused_user = self._contacts[0][0]
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
@@ -121,11 +121,12 @@ class Application:
         if bottom_bar_redraw:
             self._draw_bottom_bar()
 
-
     def _draw_top_bar(self):
         """Draw the top bar which displays the user's client ID"""
         self._top_bar.clear()
-        self._top_bar.addstr(1, 1, f"Your ID: {self._client.id}")
+        id = self._client.id
+        id_formatted = ':'.join([id[i:i+4] for i in range(0, len(id), 4)])
+        self._top_bar.addstr(1, 1, f"Your ID: {id_formatted}")
         self._top_bar.border()
         self._top_bar.refresh()
 
@@ -210,7 +211,7 @@ class Application:
                 self._flash_error(e.message)
                 return
 
-        self._contacts = self._client.get_contacts()
+        self._contacts = self._client.contacts
         self._draw_left_panel()
         if not self._focused_user:
             self._focused_user = name
@@ -253,14 +254,14 @@ class Application:
     def _add_new_contact(self):
         """Add a new contact with user supplied nickname and client ID"""
         nickname = self._ask_input("Name")
-        client_id = self._ask_input("ID")
+        client_id = self._ask_input("ID").replace(':', '')
         try:
             self._client.add_contact(nickname, client_id)
         except ClientException as e:
             self._flash_error(e.message)
             return
 
-        self._contacts = self._client.get_contacts()
+        self._contacts = self._client.contacts
         if self._focused_user == client_id or not self._focused_user:
             self._focused_user = nickname
         else:
@@ -294,7 +295,7 @@ class Application:
                     self._client.rename_contact(self._focused_user, new_name)
                 except ClientException as e:
                     self._flash_error(e.message)
-                self._contacts = self._client.get_contacts()
+                self._contacts = self._client.contacts
                 self._focused_user = new_name
 
     def _delete_contact(self):
@@ -302,7 +303,7 @@ class Application:
             confirm = self._ask_input(f"Delete {self._focused_user}? (y/N)")
             if confirm.lower() in {'y', 'yes'}:
                 self._client.delete_contact(self._focused_user)
-                self._contacts = self._client.get_contacts()
+                self._contacts = self._client.contacts
                 if len(self._contacts) > 0:
                     self._focused_user = self._contacts[0][0]
                 else:
@@ -346,20 +347,30 @@ class Application:
         self._draw_left_panel_bottom_bar()
         self._running = True
         last_poll = 0
-        while self._running:
+        while self._running and self._client.running:
             if time.time() - last_poll >= 1:
                 last_poll = time.time()
-                while self._client.new_message():
-                    sender, group, _ = self._client.receive()
-                    contact_name = group or sender
-                    self._new_message[contact_name] = True
-                    if self._focused_user == contact_name:
+                while self._client.new:
+                    event, info = self._client.receive()
+                    if event == "MESSAGE":
+                        sender, group, _ = info
+                        contact_name = group or sender
+                        self._new_message[contact_name] = True
+                        if self._focused_user == contact_name:
+                            self._draw_main_panel(True)
+                        if (contact_name, bool(group)) not in self._contacts:
+                            self._contacts.append((contact_name, bool(group)))
+                        if not self._focused_user:
+                            self._focused_user = contact_name
+                        self._draw_left_panel()
+                    else:
+                        self._contacts = self._client.contacts
+                        if event == "RENAMEGROUP":
+                            old_name, new_name = info
+                            if self._focused_user == old_name:
+                                self._focused_user = new_name
+                        self._draw_left_panel()
                         self._draw_main_panel(True)
-                    if (contact_name, bool(group)) not in self._contacts:
-                        self._contacts.append((contact_name, bool(group)))
-                    if not self._focused_user:
-                        self._focused_user = contact_name
-                    self._draw_left_panel()
             self._handle_input()
 
     def _handle_input(self):
