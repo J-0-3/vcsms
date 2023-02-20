@@ -130,7 +130,7 @@ class Client_DB:
             group_id (int): The groups numeric ID
             owner_id (str): The client ID of the group's owner
             members (list[str]): The client IDs of all the members of the group
-                (can contain the owner but doesn't have to)
+                (can include the owner but they will be added anyway if it does not)
         """
         iv = random.randrange(1, 2**128)
         encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, iv)

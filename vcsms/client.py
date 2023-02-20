@@ -192,14 +192,14 @@ class Client:
         db = self._db_connect()
         client_id = client_id.strip().lower()
         if re.fullmatch('^[0-9a-f]{32}$', client_id):
-            if db.get_id(nickname):
-                self._logger.log(f"Nickname {nickname} is already in use", 1)
-                raise NickNameInUseException(nickname)
-            if db.get_nickname(client_id):
-                self._logger.log(f"User {client_id} already exists", 1)
-                raise UserAlreadyExistsException()
-
-            db.set_nickname(client_id, nickname)
+            if client_id != self._id:
+                if db.get_id(nickname):
+                    self._logger.log(f"Nickname {nickname} is already in use", 1)
+                    raise NickNameInUseException(nickname)
+                if db.get_nickname(client_id):
+                    self._logger.log(f"User {client_id} already exists", 1)
+                    raise UserAlreadyExistsException()
+                db.set_nickname(client_id, nickname)
             db.close()
         else:
             db.close()
@@ -336,20 +336,20 @@ class Client:
 
         db.insert_group_message(group, message, self._id)
         for recipient in recipients:
-            dh_priv = random.randrange(1, self._dhke_group[1])
-            index = random.randrange(1, 2**64)
-            while index in self._messages:
+            if recipient != self._id:
+                dh_priv = random.randrange(1, self._dhke_group[1])
                 index = random.randrange(1, 2**64)
-            dh_pub, dh_sig = signing.gen_signed_dh(dh_priv, self._priv, self._dhke_group, index)
-            self._messages[index] = {
-                "client_id": recipient,
-                "dh_private": dh_priv,
-                "encryption_key": 0,
-                "data": message.decode('latin1'),
-                "group": group
-            }
-            constructed_message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
-            self._server.send(constructed_message)
+                while index in self._messages:
+                    index = random.randrange(1, 2**64)
+                dh_pub, dh_sig = signing.gen_signed_dh(dh_priv, self._priv, self._dhke_group, index)
+                self._messages[index] = {
+                    "client_id": recipient,
+                    "dh_private": dh_priv,
+                    "data": message.decode('latin1'),
+                    "group": group
+                }
+                constructed_message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
+                self._server.send(constructed_message)
 
     def create_group(self, name: str, *members: str):
         """Create a group of users which can be used to send group messages.
@@ -361,14 +361,15 @@ class Client:
         member_ids = []
         db = self._db_connect()
         for member in members:
-            member_id = db.get_id(member)
-            if member_id is None:
-                if re.fullmatch("^[a-fA-F0-9]{32}$", member):
-                    member_id = member
-                else:
-                    self._logger.log(f"User {member} not found.", 1)
-                    raise UserNotFoundException(member)
-            member_ids.append(member_id)
+            if member != self._id:
+                member_id = db.get_id(member)
+                if member_id is None:
+                    if re.fullmatch("^[a-fA-F0-9]{32}$", member):
+                        member_id = member
+                    else:
+                        self._logger.log(f"User {member} not found.", 1)
+                        raise UserNotFoundException(member)
+                member_ids.append(member_id)
 
         group_id = random.randrange(1, 2**64)
         while db.get_group_name(group_id):
@@ -383,13 +384,13 @@ class Client:
 
         def invite_user(user: str):
             key = db.get_key(user)
-
-            signature_data = ("CREATE" + name + hex(group_id) + ''.join(member_ids) + user).encode('utf-8')
+            signature_data = ("CREATE" + name + ":" + hex(group_id) + ":" + ''.join(member_ids) + ":" + user).encode('utf-8')
             signature = signing.sign(signature_data, self._priv)
             encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
             invite_message = self._message_parser.construct_message(
                 user, "CreateGroup",
-                encrypted_group_name, signature, group_id, member_ids)
+                encrypted_group_name, signature, group_id, member_ids
+            )
             self._server.send(invite_message)
 
         for member_id in member_ids:
@@ -611,8 +612,8 @@ class Client:
             self._logger.log(f"Unable to decrypt group name in creation request from {sender}.", 2)
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
-        signature_data = ("CREATE" + group_name + hex(group_id) + ''.join(members)
-                          + self._id).encode('utf-8')
+        signature_data = ("CREATE" + group_name + ":" + hex(group_id) + ":" +''.join(members) +
+                          ":" + self._id).encode('utf-8')
         self._logger.log(f"Group creation attempt from {sender}: id = {group_id}", 1)
         db = self._db_connect()
         if not db.user_known(sender):
@@ -631,7 +632,10 @@ class Client:
             while db.get_group_id(group_name) or db.get_id(group_name):
                 group_name = f"{group_name} ({postfix})"
                 postfix += 1
-            members.remove(self._id)
+            try:
+                members.remove(self._id)
+            except ValueError:
+                pass # sender didn't include us in the member list for whatever reason
             db.create_group(group_name, group_id, sender, members)
             db.close()
             self._logger.log(f"Group {group_id} successfully created.", 3)
@@ -650,17 +654,21 @@ class Client:
             signature (bytes): The signature of the group ID and my client ID
         """
         db = self._db_connect()
-        members = db.get_members_by_id(group_id)
-        if members:
+        if members := db.get_members_by_id(group_id):
             if sender in members:
                 signature_data = f"LEAVE{group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
                     self._request_key(sender)
                     if not self._await_key(sender, 60, lambda: None):
                         self._logger.log(f"Could not get public key of {sender}: timeout", 2)
-                        return
+                        return None
                 key = db.get_key(sender)
                 if signing.verify(signature_data, signature, key):
+                    if sender == db.get_owner(group_id):
+                        self._logger.log(f"Deleting group {group_id} as the owner left.", 3)
+                        db.delete_group_by_group_id(group_id)
+                        return None
+                    self._logger.log(f"Removing {sender} from {group_id} as they left.", 4)
                     db.remove_group_member(group_id, sender)
                     return None
                 return "InvalidSignature", (group_id, )
@@ -719,8 +727,7 @@ class Client:
                 InvalidSignature: The message was improperly signed
         """
         db = self._db_connect()
-        group_members = db.get_members_by_id(group_id)
-        if group_members:
+        if group_members := db.get_members(group_id):
             if self._id == db.get_owner(group_id) and sender in group_members:
                 if not db.user_known(sender):
                     self._request_key(sender)
@@ -862,15 +869,12 @@ class Client:
         Returns:
             tuple[str, tuple]: MessageAccept if successful.
                 IndexInUse: The message index is already being used by another message in process.
-                ResendAuthPacket: The sender is unknown and authentication needs to be retried
-                    after the public key is obtained (also sends a GetKey request).
                 InvalidSignature: The diffie hellman public key was incorrectly signed.
         """
         if message_index in self._messages:
             self._logger.log(
                 f"Message from {sender} requested use of already-in-use index {message_index}", 2)
             return "IndexInUse", (message_index, )
-
         db = self._db_connect()
         if not db.user_known(sender):
             self._request_key(sender)
@@ -896,7 +900,8 @@ class Client:
 
         self._messages[message_index] = {
             "client_id": sender,
-            "encryption_key": encryption_key }
+            "encryption_key": encryption_key 
+            }
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, message_index: int,
@@ -912,14 +917,13 @@ class Client:
         Returns:
             tuple[str, tuple]: MessageData if successful.
                 NoSuchIndex: The message index does not correspond to any in process message.
-                ResendAuthPacket: The sender is unknown and authentication needs to be retried
-                    after the public key is obtained (also sends a GetKey request).
                 InvalidSignature: The diffie hellman public key was incorrectly signed.
                 NotAllowed: The message index is in use by a different client to the sender.
         """
         if message_index not in self._messages:
             self._logger.log(
-                f"Message acceptance from {sender} for non-existent message {message_index}", 2)
+                f"Message acceptance from {sender} for non-existent message {message_index}", 2
+            )
             return "NoSuchIndex", (message_index, )
         if sender == self._messages[message_index]["client_id"]:
             db = self._db_connect()
@@ -976,7 +980,7 @@ class Client:
             return "NoSuchIndex", (message_index, )
 
         if sender == self._messages[message_index]["client_id"]:
-            if encryption_key not in self._messages[message_index]:
+            if "encryption_key" not in self._messages[message_index]:
                 self._logger.log(f"{sender} attempted to send message data for a message I am sending.", 2)
                 return "NotAllowed", ("MessageData", )
             encryption_key = self._messages[message_index]["encryption_key"]
@@ -990,7 +994,6 @@ class Client:
             except JSONDecodeError:
                 self._logger.log(f"Malformed message data from {sender}", 1)
                 return "MessageDataMalformed", (message_index, )
-
             try:
                 group = message_data['group']
                 data = message_data['data'].encode('latin1')
@@ -1077,4 +1080,3 @@ class Client:
         db = client_db.Client_DB(os.path.join(self._app_dir, "client.db"), os.path.join(
             self._app_dir, "keys") + "/", self._local_encryption_key, self._name_salt)
         return db
-
