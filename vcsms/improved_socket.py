@@ -107,7 +107,7 @@ class ImprovedSocket:
         Returns:
             bool: Whether there is new data available.
         """
-        return not self._queue.empty()
+        return not self._queue.empty
 
     def run(self):
         """Start the socket listening for incoming data. 

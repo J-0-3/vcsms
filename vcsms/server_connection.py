@@ -31,11 +31,10 @@ class ServerConnection:
         self._fp = fp
         self._logger = logger
         self._encryption_key = 0
-        self._public_key = (0, 0)
         self._in_queue = Queue()
         self._out_queue = Queue()
         self._connected = False
-        self._busy = False
+        self._send_lock = threading.Lock()
 
     @property
     def connected(self) -> bool:
@@ -65,15 +64,15 @@ class ServerConnection:
         pub_mod = hex(pub_key[1])[2:].encode()
         try:
             server_exp, server_mod = self._socket.recv().split(b':')
-            self._public_key = (int(server_exp, 16), int(server_mod, 16))
+            server_public_key = (int(server_exp, 16), int(server_mod, 16))
         except ValueError:
             self._socket.send(b"MalformedIdentity")
             self._socket.close()
             raise MalformedPacketException()
-        if keys.fingerprint(self._public_key, 64) != self._fp:
+        if keys.fingerprint(server_public_key, 64) != self._fp:
             self._socket.send(b"PubKeyFpMismatch")
             self._socket.close()
-            raise PublicKeyIdMismatchException(keys.fingerprint(self._public_key), self._fp)
+            raise PublicKeyIdMismatchException(keys.fingerprint(server_public_key), self._fp)
 
         pub_key_hash = keys.fingerprint(pub_key).encode()
         self._socket.send(pub_key_hash + b":" + pub_exp + b":" + pub_mod)
@@ -95,7 +94,7 @@ class ServerConnection:
             self._socket.close()
             raise MalformedPacketException()
 
-        if not signing.verify(s_dhke_pub, s_dhke_pub_sig, self._public_key):
+        if not signing.verify(s_dhke_pub, s_dhke_pub_sig, server_public_key):
             self._socket.send(b"BadSignature")
             self._socket.close()
             raise SignatureVerifyFailureException(s_dhke_pub_sig)
@@ -146,8 +145,8 @@ class ServerConnection:
         """
         try:
             self._socket.connect(self._ip, self._port)
-        except OSError as e:
-            raise NetworkError(e)
+        except OSError as exc:
+            raise NetworkError(exc)
         self._socket.run()
         self._handshake(pub_key, priv_key, dhke.group14_2048)
         self._connected = True
@@ -179,25 +178,28 @@ class ServerConnection:
                 self._in_queue.push(message)
 
     def _out_thread(self):
-        """A function to be run by a thread which encrypts, formats and sends messages in the outgoing queue to the server."""
+        """A function to be run by a thread which encrypts, formats 
+        and sends messages in the outgoing queue to the server."""
         while self._connected:
-            if not self._out_queue.empty():
-                self._busy = True
+            if not self._out_queue.empty:
+                self._send_lock.acquire()
                 message = self._out_queue.pop()
                 iv = random.randrange(1, 2 ** 128)
                 encrypted = aes256.encrypt_cbc(message, self._encryption_key, iv)
                 self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
-                self._busy = False
+                self._send_lock.release()
 
     def close(self):
         """Shutdown the connection to the server once all queued messages have been sent."""
         self._logger.log("Trying to close connection to server", 3)
         while True:
-            if self._out_queue.empty() and not self._busy:
+            if self._out_queue.empty:
+                self._send_lock.acquire()
                 self._logger.log("Able to close connection", 3)
                 self._connected = False
                 self._socket.close()
                 self._logger.log("Closed connection to server", 2)
+                self._send_lock.release()
                 break
 
     def send(self, data: bytes):
@@ -208,7 +210,7 @@ class ServerConnection:
         """
         self._out_queue.push(data)
 
-    def read(self) -> bytes:
+    def recv(self) -> bytes:
         """Block until a new piece of data is available from the connection and then return it.
 
         Returns:
@@ -216,10 +218,11 @@ class ServerConnection:
         """
         return self._in_queue.pop()
 
-    def new_msg(self) -> bool:
+    @property
+    def new(self) -> bool:
         """Check whether there is any new data from the server.
 
         Returns:
             bool: Whether there is any new data available.
         """
-        return not self._in_queue.empty()
+        return not self._in_queue.empty

@@ -163,7 +163,7 @@ class Client:
 
     @property
     def new(self) -> bool:
-        return not self._message_queue.empty()
+        return not self._message_queue.empty
 
     @property
     def contacts(self) -> list:
@@ -174,7 +174,7 @@ class Client:
         db.close()
         return contacts
 
-    def receive(self) -> tuple[str, str, bytes]:
+    def receive(self) -> tuple[str, tuple]:
         """Block until a new message is available and then return it.
 
         Returns:
@@ -562,8 +562,8 @@ class Client:
         Keeps checking for new messages and processes them on a new thread as they arrive.
         """
         while self._running:
-            if self._server.new_msg():
-                msg = self._server.read()
+            if self._server.new:
+                msg = self._server.recv()
                 t_process = threading.Thread(
                     target=self._process_message, args=(msg,))
                 t_process.start()
@@ -684,8 +684,7 @@ class Client:
             new_name (bytes): The (encrypted) new group name.
         """
         db = self._db_connect()
-        members = db.get_members_by_id(group_id)
-        if members:
+        if members := db.get_members_by_id(group_id):
             if sender in members:
                 try:
                     name_decrypted = rsa.decrypt(new_name, *self._priv).decode('utf-8')
@@ -732,7 +731,7 @@ class Client:
                 if not db.user_known(sender):
                     self._request_key(sender)
                     if not self._await_key(sender, 60, lambda: None):
-                        self._logger.log(f"Could not respond to GroupIDInUse. Client public key not received.", 2)
+                        self._logger.log("Could not respond to GroupIDInUse. Client public key not received.", 2)
                         return None
                 signature_data = f"IDINUSE{group_id}{self._id}".encode('utf-8')
                 if signing.verify(signature_data, signature, db.get_key(sender)):

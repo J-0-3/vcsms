@@ -269,7 +269,7 @@ class Server:
                 with the client.
         """
         while client.connected:
-            if not outbox.empty():
+            if not outbox.empty:
                 message = outbox.pop()
                 aes_iv = random.randrange(1, 2 ** 128)
                 ciphertext = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex()
