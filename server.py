@@ -24,13 +24,13 @@ if __name__ == "__main__":
     log_path = os.path.join(server_directory, "server.log")
     database_path = os.path.join(server_directory, "server.db")
 
-    private_key_password = input("Enter private key encryption password: ").encode('utf-8')
-    private_key_encryption_key = sha256.hash(private_key_password)
+    private_key_password = input("Enter private key encryption password: ")
+    pk_encryption_key = keys.derive_key(private_key_password)
     try:
         pub = keys.load_key(public_key_path)
-        priv = keys.load_key(private_key_path, private_key_encryption_key)
+        priv = keys.load_key(private_key_path, pk_encryption_key)
     except FileNotFoundError:
-        pub, priv = keys.generate_keys(public_key_path, private_key_path, private_key_encryption_key)
+        pub, priv = keys.generate_keys(public_key_path, private_key_path, pk_encryption_key)
     except DecryptionFailureException:
         print("Private key password incorrect. Try again.")
         quit()

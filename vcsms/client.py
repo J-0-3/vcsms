@@ -110,8 +110,7 @@ class Client:
     Remember to call the run() method before using the Client class.
     """
 
-    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str,
-                 master_password: str, logger: Logger):
+    def __init__(self, ip: str, port: int, fingerprint: str, application_directory: str, logger: Logger):
         """Initialise a VCSMS messaging client.
 
         Args:
@@ -119,7 +118,6 @@ class Client:
             port (int): The port of the VCSMS server (specified in the server's .vcsms file).
             fingerprint (str): The server's fingerprint (specified in the server's .vcsms file).
             application_directory (str): Where to store files created by the client.
-            master_password (str): The master password used to encrypt data at rest.
             logger (Logger): An instance of vcsms.logger.Logger used to log all application events.
         """
         self._id = ""
@@ -131,7 +129,7 @@ class Client:
         self._messages = {}
         self._key_requests = {}
         self._running = False
-        self._local_encryption_key = sha256.hash(master_password.encode('utf-8'))
+        self._local_encryption_key = 0
         self._name_salt = b''
         self._message_queue = Queue()
         message_response_map = {
@@ -401,14 +399,18 @@ class Client:
                 await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
                 await_key_thread.start()
 
-    def run(self):
+    def run(self, password: str):
         """Connect to the VCSMS server and begin running the client program.
         This should always be the first method called on the Client class.
+
+        Args:
+            password (str): The master password for the client program
 
         Raises:
             IncorrectMasterKeyException: The supplied master key is not correct.
         """
         os.makedirs(os.path.join(self._app_dir, "keys"), exist_ok=True)
+        self._local_encryption_key = keys.derive_key(password)
         if os.path.exists(os.path.join(self._app_dir, "keytest")):
             if not self._check_master_key():
                 self._logger.log("Incorrect master key attempt.", 0)
@@ -419,13 +421,13 @@ class Client:
         self._create_master_key_test()
 
         if os.path.exists(os.path.join(self._app_dir, "names.salt")):
-            with open(os.path.join(self._app_dir, "names.salt"), 'r') as f:
+            with open(os.path.join(self._app_dir, "names.salt"), 'r', encoding='utf-8') as f:
                 salt_iv_hex, salt_encrypted_hex = f.read().split(':')
                 salt_iv = int(salt_iv_hex, 16)
                 salt_encrypted = bytes.fromhex(salt_encrypted_hex)
                 self._name_salt = aes256.decrypt_cbc(salt_encrypted, self._local_encryption_key, salt_iv)
         else:
-            with open(os.path.join(self._app_dir, "names.salt"), 'w+') as f:
+            with open(os.path.join(self._app_dir, "names.salt"), 'w+', encoding='utf-8') as f:
                 self._name_salt = random.randbytes(256)
                 salt_iv = random.randrange(1, 2**128)
                 salt_encrypted = aes256.encrypt_cbc(self._name_salt, self._local_encryption_key, salt_iv)

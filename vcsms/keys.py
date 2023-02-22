@@ -78,3 +78,15 @@ def fingerprint(key: tuple[int, int], fp_length: int = 32) -> str:
     serialised_key = hex(key[0])[2:].encode() + hex(key[1])[2:].encode()
     fp = sha256.hash_hex(serialised_key)[2:fp_length + 2]
     return fp
+
+def derive_key(password: str, iterations: int = 5000) -> int:
+    """Derive a 256-bit encryption key from a given password.
+    
+    Args:
+        password (str): The password to use to derive the key
+        iterations (int): The number of iterations to perform (higher = slower)
+    """
+    key = password.encode('utf-8')
+    for _ in range(iterations - 1):
+        key = sha256.hash_hex(key).encode('utf-8')
+    return sha256.hash(key)

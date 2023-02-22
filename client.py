@@ -422,17 +422,14 @@ if __name__ == "__main__":
     with open(args.config, 'r', encoding='utf-8') as conf:
         serverconf = json.load(conf)
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
-    if args.password:
-        vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, args.password, logger)
-    else:
-        password = input("Enter master password: ")
-        vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, password, logger)
+    vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, logger)
+    password = args.password or input("Enter master password: ")
     try:
-        vcsms_client.run()
+        vcsms_client.run(password)
     except IncorrectMasterKeyException:
         print("Master password incorrect. Please try again.")
         quit()
     except ClientException:
-        print(f"Client failed to connect to server. See log.txt for more information.")
+        print("Client failed to connect to server. See log.txt for more information.")
         quit()
     curses.wrapper(run, vcsms_client)
