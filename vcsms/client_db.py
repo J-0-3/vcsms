@@ -449,9 +449,10 @@ class Client_DB:
             old_id (int): The ID of the group to update
             new_id (int): The new ID of the group
         """
-        self._db.execute("UPDATE groups SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UPDATE group_names SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
         self._db.execute("UPDATE group_messages SET group_id=? WHERE group_id=?", (hex(new_id), hex(old_id)))
-        self._db.execute("UDPATE group_members SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UPDATE group_members SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UPDATE group_owners SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
         self._db.commit()
 
     def delete_group_by_group_name(self, group_name: str):
@@ -480,7 +481,7 @@ class Client_DB:
         self._db.execute("DELETE FROM group_messages WHERE group_id=?", (hex(group_id), ))
         self._db.execute("DELETE FROM group_members WHERE id=?", (hex(group_id), ))
         self._db.execute("DELETE FROM group_owners WHERE id=?", (hex(group_id), ))
-        self._db.execute("DELETE FROM groups WHERE id=?", (hex(group_id), ))
+        self._db.execute("DELETE FROM group_names WHERE id=?", (hex(group_id), ))
         self._db.commit()
 
     def delete_contact_by_nickname(self, nickname: str):
