@@ -34,8 +34,7 @@ class Client_DB:
 
         self._db.execute("CREATE TABLE IF NOT EXISTS nicknames (id text primary key unique, hash text unique, ciphertext blob, iv text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS messages (id integer primary key autoincrement, sender_id text, content blob, outgoing integer, timestamp integer, iv text unique)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_owners (id text primary key unique, owner_id text)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS group_names (id text primary key unique, hash text unique, ciphertext blob, iv text)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS groups (id text primary key unique, hash text unique, ciphertext blob, iv text, owner_id text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_members (id text, client_id text)")
         self._db.execute("CREATE TABLE IF NOT EXISTS group_messages (id integer primary key autoincrement, group_id text, sender_id text, content blob, timestamp integer, iv text unique)")
         self._db.commit()
@@ -50,7 +49,7 @@ class Client_DB:
             str | None: The group name (None if it does not exist)
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT ciphertext, iv FROM group_names WHERE id=?", (hex(group_id), ))
+        cursor.execute("SELECT ciphertext, iv FROM groups WHERE id=?", (hex(group_id), ))
         res = cursor.fetchone()
         if res is None:
             return None
@@ -77,7 +76,7 @@ class Client_DB:
             name_hash = self._cached_groupname_hashes[group_name]
         else:
             name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
-        cursor.execute("SELECT id FROM group_names WHERE hash=?", (name_hash, ))
+        cursor.execute("SELECT id FROM groups WHERE hash=?", (name_hash, ))
         res = cursor.fetchone()
         if res is None:
             return None
@@ -101,9 +100,9 @@ class Client_DB:
 
         cursor.execute(("SELECT client_id "
                        "FROM group_members "
-                       "INNER JOIN group_names "
-                       "ON group_names.id = group_members.id "
-                       "WHERE group_names.hash = ?"), (name_hash, ))
+                       "INNER JOIN groups "
+                       "ON groups.id = group_members.id "
+                       "WHERE groups.hash = ?"), (name_hash, ))
 
         results = cursor.fetchall()
         return [result[0] for result in results]
@@ -137,8 +136,8 @@ class Client_DB:
         name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
         self._cached_groupname_plaintexts[(encrypted_group_name, iv)] = group_name
         self._cached_groupname_hashes[group_name] = name_hash
-        self._db.execute("INSERT INTO group_names (id, hash, ciphertext, iv) VALUES (?, ?, ?, ?)", (hex(group_id), name_hash, encrypted_group_name, hex(iv)))
-        self._db.execute("INSERT INTO group_owners (id, owner_id) VALUES (?, ?)", (hex(group_id), owner_id))
+        self._db.execute("INSERT INTO groups (id, hash, ciphertext, iv, owner_id) VALUES (?, ?, ?, ?)", 
+                         (hex(group_id), name_hash, encrypted_group_name, hex(iv), owner_id))
         for member in members:
             self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), member))
         if owner_id not in members:
@@ -167,7 +166,7 @@ class Client_DB:
         name_ciphertext = aes256.encrypt_cbc(name.encode('utf-8'), self._encryption_key, name_iv)
         self._cached_groupname_hashes[name] = name_hash
         self._cached_groupname_plaintexts[(name_ciphertext, name_iv)] = name
-        self._db.execute("UPDATE group_names SET hash=?, iv=?, ciphertext=? WHERE id=?", 
+        self._db.execute("UPDATE groups SET hash=?, iv=?, ciphertext=? WHERE id=?", 
             (name_hash, hex(name_iv), name_ciphertext, hex(group_id)))
         self._db.commit()
 
@@ -229,7 +228,7 @@ class Client_DB:
             str | None: The client ID or None if the group does not exist
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT owner_id FROM group_owners WHERE id=?", (group_id, ))
+        cursor.execute("SELECT owner_id FROM groups WHERE id=?", (group_id, ))
         result = cursor.fetchone()
         if result is None:
             return None
@@ -318,11 +317,11 @@ class Client_DB:
         cursor = self._db.cursor()
         cursor.execute(("SELECT group_messages.content, group_messages.iv, IFNULL(nicknames.ciphertext, group_messages.sender_id), nicknames.iv "
                         "FROM group_messages "
-                        "INNER JOIN group_names "
-                        "ON group_messages.group_id = group_names.id "
+                        "INNER JOIN groups "
+                        "ON group_messages.group_id = groups.id "
                         "LEFT JOIN nicknames "
                         "ON group_messages.sender_id = nicknames.id "
-                        "WHERE group_names.hash=? "
+                        "WHERE groups.hash=? "
                         "ORDER BY timestamp "
                         "DESC"
                         f"{' LIMIT ?' if count else ''}"),
@@ -449,10 +448,9 @@ class Client_DB:
             old_id (int): The ID of the group to update
             new_id (int): The new ID of the group
         """
-        self._db.execute("UPDATE group_names SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
+        self._db.execute("UPDATE groups SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
         self._db.execute("UPDATE group_messages SET group_id=? WHERE group_id=?", (hex(new_id), hex(old_id)))
         self._db.execute("UPDATE group_members SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
-        self._db.execute("UPDATE group_owners SET id=? WHERE id=?", (hex(new_id), hex(old_id)))
         self._db.commit()
 
     def delete_group_by_group_name(self, group_name: str):
@@ -466,10 +464,9 @@ class Client_DB:
         else:
             groupname_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
             self._cached_groupname_hashes[group_name] = groupname_hash
-        self._db.execute("DELETE FROM group_messages WHERE group_id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
-        self._db.execute("DELETE FROM group_members WHERE id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
-        self._db.execute("DELETE FROM group_owners WHERE id IN (SELECT id FROM group_names WHERE hash=?)", (groupname_hash, ))
-        self._db.execute("DELETE FROM group_names WHERE hash=?", (groupname_hash, ))
+        self._db.execute("DELETE FROM group_messages WHERE group_id IN (SELECT id FROM groups WHERE hash=?)", (groupname_hash, ))
+        self._db.execute("DELETE FROM group_members WHERE id IN (SELECT id FROM groups WHERE hash=?)", (groupname_hash, ))
+        self._db.execute("DELETE FROM groups WHERE hash=?", (groupname_hash, ))
         self._db.commit()
 
     def delete_group_by_group_id(self, group_id: int):
@@ -480,8 +477,7 @@ class Client_DB:
         """
         self._db.execute("DELETE FROM group_messages WHERE group_id=?", (hex(group_id), ))
         self._db.execute("DELETE FROM group_members WHERE id=?", (hex(group_id), ))
-        self._db.execute("DELETE FROM group_owners WHERE id=?", (hex(group_id), ))
-        self._db.execute("DELETE FROM group_names WHERE id=?", (hex(group_id), ))
+        self._db.execute("DELETE FROM groups WHERE id=?", (hex(group_id), ))
         self._db.commit()
 
     def delete_contact_by_nickname(self, nickname: str):
@@ -567,7 +563,7 @@ class Client_DB:
             list[str]: The names of all groups of which you are part.
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT ciphertext, iv FROM group_names")
+        cursor.execute("SELECT ciphertext, iv FROM groups")
         names = []
         for ciphertext, iv_hex in cursor.fetchall():
             iv = int(iv_hex, 16)
