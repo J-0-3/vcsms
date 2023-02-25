@@ -6,24 +6,42 @@ from .exceptions import DecryptionFailureException
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b 
-    and also the values x and y such that ax + by = gcd (a,b).
+    and also the values s and t such that at + bs = gcd (a,b).
 
     Args:
         a (int)
         b (int)
 
     Returns:
-        tuple: (gcd, x, y)
+        tuple: (gcd, s, t)
     """
     if a == 0:
-        return b, 0, 1
-    gcd, x, y = gcd_extended_euclid(b % a, a)
-
-    stored_x = x
-    x = y - x * (b // a)
-    y = stored_x
-
-    return gcd, x, y
+        if b == 0:
+            return 0, 1, 1
+        return 0, 1, 0
+    elif b == 0:
+        return 0, 0, 1
+    quotient = a // b
+    remainder = a % b
+    s1 = 1
+    s2 = 0
+    s3 = 1
+    t1 = 0
+    t2 = 1
+    t3 = t1 - quotient * t2
+    while remainder != 0:
+        quotient = b // remainder
+        remainder_copy = remainder
+        remainder = b % remainder
+        # print(f"{b} = {quotient} * {remainder_copy} + {remainder}")
+        b = remainder_copy
+        s1 = s2
+        s2 = s3
+        s3 = s1 - quotient * s2
+        t1 = t2
+        t2 = t3
+        t3 = t1 - quotient * t2
+    return b, s2, t2
 
 
 def calculate_keys(p: int, q: int, e: int = 65537) -> tuple:
