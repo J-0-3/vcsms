@@ -300,7 +300,7 @@ class Client_DB:
         return messages
 
     def get_group_messages(self, group_name: str, count: int = 0) -> list[tuple[bytes, str]]:
-        """Get all messages to/from a given group
+        """Get *count* messages to/from a given group
 
         Args:
             group_name (str): The name of the group to lookup
@@ -347,28 +347,6 @@ class Client_DB:
                 self._cached_message_plaintexts[(encrypted_content, aes_iv)] = content
                 messages.append((content, sender))
         return messages
-
-    def count_messages(self, nickname: str) -> int:
-        """Count the number of messages available from a nickname
-
-        Args:
-            nickname (str): The contact nickname to lookup
-
-        Returns:
-            int: The number of messages available
-        """
-        cursor = self._db.cursor()
-        if nickname in self._cached_nickname_hashes:
-            nickname_hash = self._cached_nickname_hashes[nickname]
-        else:
-            nickname_hash = sha256.hash_hex(nickname.encode('utf-8') + self._name_salt)
-            self._cached_nickname_hashes[nickname] = nickname_hash
-
-        cursor.execute(("SELECT COUNT (*) "
-                        "FROM messages "
-                        "INNER JOIN nicknames ON messages.id = nicknames.id "
-                        "WHERE nicknames.hash=?"), (nickname_hash, ))
-        return cursor.fetchone()[0]
 
     def insert_message(self, client_id: str, message: bytes, sent: bool):
         """Insert a message into the database.

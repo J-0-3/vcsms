@@ -319,7 +319,7 @@ class Client:
         self._server.send(message)
 
     def _group_send(self, group_name: str, message: bytes):
-        """Send a message to all recipients in the sepecified group.
+        """Send a message to all recipients in the specified group.
 
         Args:
             group_name (str): The name of the group to sent the messages to.
@@ -728,7 +728,7 @@ class Client:
                 InvalidSignature: The message was improperly signed
         """
         db = self._db_connect()
-        if group_members := db.get_members(group_id):
+        if group_members := db.get_members_by_id(group_id):
             if self._id == db.get_owner(group_id) and sender in group_members:
                 if not db.user_known(sender):
                     self._request_key(sender)
