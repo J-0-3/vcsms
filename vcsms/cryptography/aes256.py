@@ -1,6 +1,8 @@
 import math
 import random
-from .utils import get_msb, i_to_b
+
+from . import hmac
+from .utils import get_msb, xor_b
 from .exceptions import DecryptionFailureException
 
 s_box = [[0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76],
@@ -45,25 +47,40 @@ def invert_sbox(s_box: list) -> list:
 inverse_s_box = invert_sbox(s_box)
 
 
-def split_blocks(data: int) -> list:
-    """Split an integer of any length into 128 bit blocks.
-    Used to split arbitrary length plain/cipher text into
-    encryptable blocks.
+def add_pkcs7(data: bytes) -> bytes:
+    """Add PKCS7 padding to the data to make it a multiple
+    of 16 bytes in length.
+    """
+    to_pad = 16 - len(data) % 16
+    data += (to_pad) * to_pad.to_bytes(1, 'big')
+    return data
+
+def remove_pkcs7(data: bytes) -> bytes:
+    """Remove PKCS#7 padding from some data to retrieve the
+    original data prior to being padded."""
+    num_padded = data[-1]
+    if num_padded > 16 or num_padded == 0:
+        raise ValueError("Invalid Padding")
+    if len(data) < num_padded:
+        raise ValueError("Invalid Padding")
+    for i in range(1, num_padded + 1):
+        if data[-i] != num_padded:
+            raise ValueError("Invalid Padding")
+    return data[:len(data) - num_padded]
+
+def split_blocks(data: bytes) -> list:
+    """Split data into 16 byte chunks. Data MUST be 
+    a multiple of 16 bytes in length.
 
     Args:
         data (int): The integer to split
 
     Returns:
-        list: A list of 128 bit integer blocks
+        list: A list of 16 byte blocks
     """
-    blocks = []
-    if data == 0:
-        return [0]
-
-    block_count = math.ceil((get_msb(data)+1)/128)
-    for i in range(block_count):
-        blocks.append(data % 2**(128*(i+1)) >> 128*(i))
-    blocks.reverse()
+    if len(data) % 16 != 0:
+        raise ValueError("Data length is not a multiple of 16")
+    blocks = [data[i:i+16] for i in range(0, len(data), 16)]
     return blocks
 
 
@@ -374,13 +391,32 @@ def word_array_to_4x4_matrix(words: list) -> list:
     return mat
 
 
-def int_to_4x4_matrix(x: int) -> list:
+def bytes_to_matrix(x: bytes) -> list:
     """
-    Convert a 128 bit integer into a 4x4 column major matrix
+    Convert a 16 byte block into a 4x4 column major matrix
     """
-    words = int_to_word_array(x, 4)
-    return word_array_to_4x4_matrix(words)
+    if len(x) != 16:
+        raise ValueError("Length of block is not 16 bytes")
+    matrix = [
+        [x[0], x[4], x[8], x[12]], 
+        [x[1], x[5], x[9], x[13]], 
+        [x[2], x[6], x[10], x[14]], 
+        [x[3], x[7], x[11], x[15]]
+    ]
+    return matrix
 
+def matrix_to_bytes(m: list) -> bytes:
+    """Concatenate a 4x4 byte matrix into a 16 byte long string
+    
+    Args:
+        m (list): The byte matrix
+    
+    Returns:
+        bytes: The resultant bytestring"""
+    string = b''
+    for byte in sum(zip(*m), start=()):
+        string += byte.to_bytes(1, 'big')
+    return string
 
 def matrix_to_int(m: list) -> int:
     """Concatenate a 4x4 column major byte matrix into a 16 byte (128 bit) integer.
@@ -426,13 +462,13 @@ def sub_word(word: int):
 
 
 def rotate_word(word: int) -> int:
-    """Perform a one byte right rotation on a 4 byte word
+    """Perform a one byte left rotation on a 4 byte word
 
     Args:
         word (int): An integer word of length 4 bytes
 
     Returns:
-        int: The result of a right byte rotation on the word
+        int: The result of a left byte rotation on the word
     """
     word_bytes = split_bytes(word)
     return combine_byte_array([word_bytes[1], word_bytes[2], word_bytes[3], word_bytes[0]])
@@ -501,7 +537,7 @@ def decipher_round(state: list, round_key: list) -> list:
     return state
 
 
-def encrypt_block(key_schedule: list, block: int) -> int:
+def encrypt_block(key_schedule: list, block: bytes) -> int:
     """Encrypt a 128 bit message block using 14 AES rounds
 
     Args:
@@ -511,7 +547,7 @@ def encrypt_block(key_schedule: list, block: int) -> int:
     Returns:
         int: The resultant 128 bit ciphertext block
     """
-    state = int_to_4x4_matrix(block)
+    state = bytes_to_matrix(block)
     r_0_round_key = word_array_to_4x4_matrix(key_schedule[0:4])
     state = add_round_key(state, r_0_round_key)
     for r in range(1, 14):
@@ -519,10 +555,10 @@ def encrypt_block(key_schedule: list, block: int) -> int:
     state = sub_bytes(state)
     state = shift_rows(state)
     state = add_round_key(state, word_array_to_4x4_matrix(key_schedule[56:60]))
-    return matrix_to_int(state)
+    return matrix_to_bytes(state)
 
 
-def decrypt_block(key_schedule: list, block: int) -> int:
+def decrypt_block(key_schedule: list, block: bytes) -> int:
     """Decrypt one 128 bit ciphertext block using 14 AES rounds
 
     Args:
@@ -532,7 +568,7 @@ def decrypt_block(key_schedule: list, block: int) -> int:
     Returns:
         int: The resultant 128 bit message block
     """
-    state = int_to_4x4_matrix(block)
+    state = bytes_to_matrix(block)
     r_0_round_key = word_array_to_4x4_matrix(key_schedule[56:60])
     state = add_round_key(state, r_0_round_key)
     for r in range(1, 14):
@@ -540,7 +576,7 @@ def decrypt_block(key_schedule: list, block: int) -> int:
     state = shift_rows(state, True)
     state = sub_bytes(state, True)
     state = add_round_key(state, word_array_to_4x4_matrix(key_schedule[0:4]))
-    return matrix_to_int(state)
+    return matrix_to_bytes(state)
 
 
 def pad(data: bytes, max_pad_bytes: int = 2048) -> bytes:
@@ -578,6 +614,8 @@ def unpad(data: bytes) -> bytes:
     """
     num_before = int.from_bytes(data[:2], 'big')
     num_after = int.from_bytes(data[2:4], 'big')
+    if num_before + num_after > len(data):
+        raise ValueError("Padding is apparently longer than entire data")
     return data[num_before + 4:-num_after]
 
 def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:
@@ -597,18 +635,14 @@ def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:
         bytes: The encrypted ciphertext bytestring
     """
     if not raw:
-        data_as_int = int.from_bytes(b'AES' + pad(data), 'big')
+        data_padded = add_pkcs7(pad(data))
     else:
-        data_as_int = int.from_bytes(data, 'big')
-    message_blocks = split_blocks(data_as_int)
+        data_padded = add_pkcs7(data)
+    message_blocks = split_blocks(data_padded)
     key_schedule = expand_key(key)
     ciphertext_blocks = [encrypt_block(key_schedule, block) for block in message_blocks]
-    ciphertext = 0
-    shift = len(ciphertext_blocks) * 128 - 128
-    for block in ciphertext_blocks:
-        ciphertext |= (block << shift)
-        shift -= 128
-    return i_to_b(ciphertext)
+    ciphertext = b''.join(ciphertext_blocks)
+    return ciphertext
 
 
 def decrypt_ecb(ciphertext: bytes, key: int, raw: bool = False) -> bytes:
@@ -623,27 +657,23 @@ def decrypt_ecb(ciphertext: bytes, key: int, raw: bool = False) -> bytes:
     Returns:
         bytes: The decrypted plaintext bytestring
     """
-    ciphertext_as_int = int.from_bytes(ciphertext, 'big')
-    ciphertext_blocks = split_blocks(ciphertext_as_int)
+    ciphertext_blocks = split_blocks(ciphertext)
     key_schedule = expand_key(key)
     message_blocks = [decrypt_block(key_schedule, block) for block in ciphertext_blocks]
-    message = 0
-    shift = len(message_blocks) * 128 - 128
-    for block in message_blocks:
-        message |= (block << shift)
-        shift -= 128
-
-    plaintext = i_to_b(message)
-    if plaintext[0:3] == b'AES':
+    message = b''.join(message_blocks)
+    try:
+        message = remove_pkcs7(message)
+    except ValueError:
+        raise DecryptionFailureException(key)
+    if not raw:
         try:
-            unpadded = unpad(plaintext[3:])
-            return unpadded
+            message = unpad(message)
         except:
             raise DecryptionFailureException(key)
-    raise DecryptionFailureException(key)
+    return message
 
 
-def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False) -> bytes:
+def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False, add_hmac: bool = True) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
     This means that the output of the encryption of each plaintext block
     is XORed with the next plaintext block before it is encrypted which
@@ -656,36 +686,36 @@ def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False) -> bytes:
         key (int): The 256 bit encryption key
         iv (int): The 128 bit initialisation vector to XOR with the first block. 
             It is highly recommended this is provided. (Default 0)
-        raw (bool): Do not pad or add any additional information to the plaintext.
+        raw (bool): Do not add any additional information to the plaintext besides PKCS#7.
             You definitely do not want to do this. (Default False)
+        add_hmac (bool): Whether to append an HMAC to the ciphertext (encrypt-then-hmac)
+            (Default True)
 
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
     if not raw:
-        data_as_int = int.from_bytes(b'AES' + pad(data), 'big')
+        data_padded = add_pkcs7(pad(data))
     else:
-        data_as_int = int.from_bytes(data, 'big')
-    message_blocks = split_blocks(data_as_int)  # split message into blocks
+        data_padded = add_pkcs7(data)
+    message_blocks = split_blocks(data_padded)  # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
-    prev_output = iv
+    prev_output = iv.to_bytes(16, 'big')
     for block in message_blocks:
-        xored_block = block ^ prev_output  # xor with previous block output
+        xored_block = xor_b(block, prev_output)  # xor with previous block output
         ciphertext_block = encrypt_block(key_schedule, xored_block)
         prev_output = ciphertext_block
         ciphertext_blocks.append(ciphertext_block)
 
-    # combine blocks by repeated left shift and OR
-    shift = len(ciphertext_blocks) * 128 - 128
-    ciphertext = 0
-    for block in ciphertext_blocks:
-        ciphertext |= (block << shift)
-        shift -= 128
-    return i_to_b(ciphertext)
+    ciphertext = b''.join(ciphertext_blocks)
+    if add_hmac:
+        ciphertext_hmac = hmac.calculate(ciphertext, iv, key)
+        ciphertext += ciphertext_hmac
+    return ciphertext
 
 
-def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False) -> bytes:
+def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False, added_hmac: bool = True) -> bytes:
     """Decrypt a bytestring using AES in Cipher Block Chaining mode.
 
     Args:
@@ -694,35 +724,40 @@ def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False) -> byte
         iv (int): The 128 bit initialisation vector used when the data was encrypted.
         raw (bool): The data did not have any padding or formatting applied before encryption.
             (Default: False).
+        added_hmac (bool): Whether an HMAC was appended to the ciphertext (Default True)
 
     Returns:
         bytes: The decrypted plaintext bytestring
     """
-    ciphertext_as_int = int.from_bytes(ciphertext, 'big')
-    ciphertext_blocks = split_blocks(ciphertext_as_int)
+    if added_hmac:
+        if len(ciphertext) < 32:
+            raise DecryptionFailureException(key)
+        ciphertext_hmac = ciphertext[-32:]
+        ciphertext = ciphertext[:-32]
+        if not hmac.verify(ciphertext_hmac, ciphertext, iv, key):
+            raise DecryptionFailureException(key)
+    ciphertext_blocks = split_blocks(ciphertext)
     key_schedule = expand_key(key)
     message_blocks = []
     for i, block in enumerate(ciphertext_blocks):
         if i == 0:
-            prev_output = iv
+            prev_output = iv.to_bytes(16, 'big')
         else:
             prev_output = ciphertext_blocks[i-1]
 
         xored_block = decrypt_block(key_schedule, block)
-        message_blocks.append(xored_block ^ prev_output)
+        message_blocks.append(xor_b(xored_block, prev_output))
 
-    message = 0
-    shift = len(message_blocks) * 128 - 128
-    for block in message_blocks:
-        message |= (block << shift)
-        shift -= 128
+    plaintext = b''.join(message_blocks)
 
-    plaintext = i_to_b(message)
-    if plaintext[:3] == b'AES':
+    try:
+        plaintext = remove_pkcs7(plaintext)
+    except ValueError:
+        raise DecryptionFailureException(key)
+    if not raw:
         try:
-            unpadded = unpad(plaintext[3:])
-            return unpadded
+            plaintext = unpad(plaintext)
         except:
             raise DecryptionFailureException(key)
-    raise DecryptionFailureException(key)
+    return plaintext
 

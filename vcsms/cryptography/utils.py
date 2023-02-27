@@ -23,3 +23,15 @@ def i_to_b(n: int) -> bytes:
     """
     byte_length = math.ceil((get_msb(n) + 1) / 8)
     return n.to_bytes(byte_length, 'big') 
+
+def xor_b(b1: bytes, b2: bytes) -> bytes:
+    """XOR together two bytestrings. If the lengths are different,
+    prepend zeroes before the shorter of the bytestrings."""
+    while len(b1) < len(b2):
+        b1 = b'\x00' + b1
+    while len(b2) < len(b1):
+        b2 = b'\x00' + b2
+    xored = b''
+    for a, b in zip(b1, b2):
+        xored += (a ^ b).to_bytes(1, 'big')
+    return xored
