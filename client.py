@@ -9,32 +9,88 @@ from vcsms.client import Client
 from vcsms.logger import Logger
 from vcsms.exceptions.client import IncorrectMasterKeyException, ClientException
 
-class ScrollableTextBox:
+class ScrollingTextBox:
+    """A simple one line horizontal scrolling text input box"""
+    MAXCHARS = 16384
+    def __init__(self, window: curses.window, y: int, x: int, width: int):
+        """Construct a ScrollingTextBox
+        
+        Args:
+            window (window): The curses main screen (stdscr)
+            y (int): The y coordinate of the top left corner of the box.
+            x (int): The x coordinate of the top left corner of the box.
+            width (int): The width of the textbox.
+        """
+        self._y = y
+        self._x = x
+        self._width = width
+        self._pad = curses.newpad(1, self.MAXCHARS)
+        self._window = window 
+
+    def input(self):
+        """Accept input from the user in the box until the enter key is pressed.
+        
+        Returns:
+            str: The text the user entered.
+        """
+        scroll = 0
+        entered = ""
+        self._window.nodelay(False)
+        while (key := self._window.getkey()) not in ('\n', "KEY_ENTER"):
+            self._pad.clear()
+            if key in ('KEY_BACKSPACE', '\b'):
+                if len(entered) > self._width:
+                    scroll -= 1
+                entered = entered[:-1]
+            else:
+                entered += key
+                if len(entered) > self._width:
+                    scroll += 1
+            self._pad.addstr(entered)
+            self._pad.refresh(0, scroll, self._y, self._x, self._y + 1, self._x + self._width)
+        self._window.nodelay(True)
+        return entered
+
+class ScrollablePad:
+    """A vertically scrollable text pad"""
+    MAXLINES = 300000
     def __init__(self, y: int, x: int, height: int, width: int):
+        """Construct a ScrollablePad
+        
+        Args:
+            y (int): The y coordinate of the top-left corner of the pad.
+            x (int): The x coordinate of the top-left corner of the pad.
+            height (int): The height of the pad.
+            width (int): The width of the pad.
+        """
         self._y = y
         self._x = x
         self._height = height
         self.scroll = 0
         self._width = width
         self._line_buf = []
-        self.pad = curses.newpad(30000, width)
+        self.pad = curses.newpad(self.MAXLINES, width)
     
     @property
-    def num_lines(self): return len(self._line_buf)
+    def num_lines(self) -> int: return len(self._line_buf)
 
     @property
-    def y(self): return self._y
+    def y(self) -> int: return self._y
 
     @property
-    def x(self): return self._x
+    def x(self) -> int: return self._x
 
     @property
-    def height(self): return self._height
+    def height(self) -> int: return self._height
 
     @property
-    def width(self): return self._width
+    def width(self) -> int: return self._width
+
+    @property
+    def max_scroll(self) -> int: return len(self._line_buf) - self._height
 
     def display(self):
+        """Redraw the pad on the screen to reflect the current contents."""
         top_line = max(0, self.num_lines - self._height - self.scroll)
         self.pad.clear()
         for i, v in enumerate(self._line_buf):
@@ -42,23 +98,40 @@ class ScrollableTextBox:
         self.pad.refresh(top_line, 0, self._y, self._x, self._y + self._height, self._x + self._width)
 
     def add_string(self, string: str):
+        """Append a string to the end of the pad.
+        If the string is longer than the width of the pad it will be split
+        into multiple lines.
+        
+        Args:
+            string (str): The string to add
+        """
         lines = string.split('\n')
         for line in lines:
             while len(line) > self._width - 1:
-                self._line_buf.append(line[:self._width - 1])
+                if len(self._line_buf) < self.MAXLINES:
+                    self._line_buf.append(line[:self._width - 1])
                 line = line[self._width - 1:]
-            self._line_buf.append(line)
+            if len(self._line_buf) < self.MAXLINES:
+                self._line_buf.append(line)
 
     def scroll_down(self, amount: int):
+        """Scroll the view of the pad down.
+        
+        Args:
+            amount (int): The amount of lines to scroll the pad by.
+        """
         self.scroll = max(0, self.scroll - amount)
     
     def scroll_up(self, amount: int):
-        self.scroll = min(self.scroll + amount, self.get_max_scroll())
-
-    def get_max_scroll(self) -> int:
-        return len(self._line_buf) - self._height
+        """Scroll the view of the pad up.
+        
+        Args:
+            amount (int): The amount of lines to scroll the pad by.
+        """
+        self.scroll = min(self.scroll + amount, self.max_scroll)
 
     def clear(self):
+        """Delete all contents from the pad."""
         self.pad.clear()
         self.scroll = 0
         self._line_buf.clear()
@@ -84,18 +157,18 @@ class Application:
         if len(self._contacts) > 0:
             self.__focused_user = self._contacts[0][0]
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
-        self._left_panel = curses.newpad(curses.LINES - 3, 26)
-        self._bottom_bar = curses.newwin(3, curses.COLS - 26, curses.LINES - 3, 26)
-        self._left_panel_bottom_bar = curses.newwin(3, 26, curses.LINES - 3, 0)
-        self._top_bar = curses.newwin(3, curses.COLS - 26, 0, 26)
-        self._main_panel = ScrollableTextBox(3, 26, curses.LINES - 7, curses.COLS - 27)
         self._panel_sizes = {
-            "main": (curses.LINES - 6, curses.COLS - 26),
+            "main": (curses.LINES - 7, curses.COLS - 27),
             "left": (curses.LINES - 3, 26),
-            "bottom": (3, curses.COLS - 26),
-            "top": (3, curses.COLS - 26),
+            "bottom": (3, curses.COLS - 27),
+            "top": (3, curses.COLS - 27),
             "left_bottom": (3, 26)
         }
+        self._left_panel = curses.newpad(*self._panel_sizes["left"] )
+        self._bottom_bar = curses.newwin(*self._panel_sizes["bottom"], curses.LINES - 3, 26)
+        self._left_panel_bottom_bar = curses.newwin(*self._panel_sizes["left_bottom"], curses.LINES - 3, 0)
+        self._top_bar = curses.newwin(*self._panel_sizes["top"], 0, 26)
+        self._main_panel = ScrollablePad(3, 26, *self._panel_sizes["main"])
         self._stdscr.refresh()
         self._stdscr.nodelay(True)
 
@@ -148,7 +221,7 @@ class Application:
             instructions += "(a)dd (q)uit "
             if self._main_panel.scroll > 0:
                 instructions += "j \u2193 "
-            if self._main_panel.scroll < self._main_panel.get_max_scroll():
+            if self._main_panel.scroll < self._main_panel.max_scroll:
                 instructions += "k \u2191"
             self._bottom_bar.addstr(1, 1, instructions)
         self._bottom_bar.border()
@@ -222,7 +295,7 @@ class Application:
         """
         if reload_messages:
             self._main_panel.clear()
-            self._message_buffer = self._client.get_messages(self._focused_user)[::-1]
+            self._message_buffer = self._client.get_messages(self._focused_user)[:ScrollablePad.MAXLINES][::-1]
             for message, sender in self._message_buffer:
                 if sender == self._id:
                     self._main_panel.add_string(f"TO {self._focused_user}: {message.decode('utf-8')}")
@@ -230,7 +303,7 @@ class Application:
                     self._main_panel.add_string(f"FROM {sender}: {message.decode('utf-8')}")
         self._main_panel.display()
 
-    def _ask_input(self, prompt: str, height: int = 1) -> str:
+    def _ask_input(self, prompt: str) -> str:
         """Ask for input given a specific prompt.
 
         Args:
@@ -241,15 +314,14 @@ class Application:
             str: The input typed by the user
         """
         self._draw_bottom_bar(f"{prompt}: ")
-        textbox_width = curses.COLS - (26 + len(prompt) + 3)
-        textbox_x = 26 + len(prompt) + 3
-        textbox_y = curses.LINES - (height + 1)
-        textbox_container = curses.newwin(height, textbox_width, textbox_y, textbox_x)
-        textbox = curses.textpad.Textbox(textbox_container)
+        textbox_width = self._panel_sizes["bottom"][1] - (len(prompt) + 3)
+        textbox_x = self._panel_sizes["left"][1] + (len(prompt) + 3)
+        textbox_y = curses.LINES - 2
+        textbox = ScrollingTextBox(self._stdscr, textbox_y, textbox_x, textbox_width)
         self._stdscr.refresh()
-        textbox.edit()
+        inputted = textbox.input()
         self._draw_bottom_bar()
-        return textbox.gather().strip()
+        return inputted
 
     def _add_new_contact(self):
         """Add a new contact with user supplied nickname and client ID"""
@@ -358,6 +430,7 @@ class Application:
                         self._new_message[contact_name] = True
                         if self._focused_user == contact_name:
                             self._draw_main_panel(True)
+                            self._draw_bottom_bar()
                         if (contact_name, bool(group)) not in self._contacts:
                             self._contacts.append((contact_name, bool(group)))
                         if not self._focused_user:
