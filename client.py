@@ -1,4 +1,4 @@
-#!/bin/python
+#!/usr/bin/env python3
 import curses
 import curses.textpad
 import argparse
@@ -9,7 +9,36 @@ from vcsms.client import Client
 from vcsms.logger import Logger
 from vcsms.exceptions.client import IncorrectMasterKeyException, ClientException
 
-class ScrollingTextBox:
+class UIComponent:
+    def __init__(self, screen: curses.window, 
+                 y: int, x: int, height: int, width: int,
+                 pad_internal_height: int, pad_internal_width: int):
+        self._y = y
+        self._x = x
+        self._width = width
+        self._height = height
+        self._screen = screen
+        self._pad = curses.newpad(pad_internal_height, pad_internal_width)
+        screen.refresh()
+    
+    @property
+    def x(self) -> int: return self._x
+    
+    @property
+    def y(self) -> int: return self._y
+    
+    @property
+    def width(self) -> int: return self._width
+    
+    @property
+    def height(self) -> int: return self._height
+    
+    def display(self):
+        self._pad.clear()
+        self._pad.refresh(0, 0, self._y, self._x, self._y + self._height, self._x + self._width)
+    
+    
+class ScrollingTextBox(UIComponent):
     """A simple one line horizontal scrolling text input box"""
     MAXCHARS = 16384
     def __init__(self, window: curses.window, y: int, x: int, width: int):
@@ -21,11 +50,17 @@ class ScrollingTextBox:
             x (int): The x coordinate of the top left corner of the box.
             width (int): The width of the textbox.
         """
-        self._y = y
-        self._x = x
-        self._width = width
-        self._pad = curses.newpad(1, self.MAXCHARS)
-        self._window = window 
+        super().__init__(window, y, x, 1, width, 1, self.MAXCHARS)
+        self._scroll = 0
+        self._contents = ""
+
+    @property
+    def contents(self) -> str: return self._contents
+
+    def display(self):
+        self._pad.clear()
+        self._pad.addstr(self._contents)
+        self._pad.refresh(0, self._scroll, self._y, self._x, self._y + 1, self._x + self._width)
 
     def input(self):
         """Accept input from the user in the box until the enter key is pressed.
@@ -33,28 +68,23 @@ class ScrollingTextBox:
         Returns:
             str: The text the user entered.
         """
-        scroll = 0
-        entered = ""
-        self._window.nodelay(False)
-        while (key := self._window.getkey()) not in ('\n', "KEY_ENTER"):
-            self._pad.clear()
+        self._screen.nodelay(False)
+        while (key := self._screen.getkey()) not in ('\n', "KEY_ENTER"):
             if key in ('KEY_BACKSPACE', '\b'):
-                if len(entered) > self._width:
-                    scroll -= 1
-                entered = entered[:-1]
+                if len(self._contents) > self._width:
+                    self._scroll -= 1
+                self._contents = self._contents[:-1]
             elif len(key) == 1:
-                entered += key
-                if len(entered) > self._width:
-                    scroll += 1
-            self._pad.addstr(entered)
-            self._pad.refresh(0, scroll, self._y, self._x, self._y + 1, self._x + self._width)
-        self._window.nodelay(True)
-        return entered
+                self._contents += key
+                if len(self._contents) > self._width:
+                    self._scroll += 1
+            self.display()
+        self._screen.nodelay(True)
 
-class ScrollablePad:
+class ScrollablePad(UIComponent):
     """A vertically scrollable text pad"""
     MAXLINES = 300000
-    def __init__(self, y: int, x: int, height: int, width: int):
+    def __init__(self, screen: curses.window, y: int, x: int, height: int, width: int):
         """Construct a ScrollablePad
         
         Args:
@@ -63,28 +93,13 @@ class ScrollablePad:
             height (int): The height of the pad.
             width (int): The width of the pad.
         """
-        self._y = y
-        self._x = x
-        self._height = height
+        super().__init__(screen, y, x, height, width, self.MAXLINES, width)
         self.scroll = 0
-        self._width = width
         self._line_buf = []
         self.pad = curses.newpad(self.MAXLINES, width)
     
     @property
     def num_lines(self) -> int: return len(self._line_buf)
-
-    @property
-    def y(self) -> int: return self._y
-
-    @property
-    def x(self) -> int: return self._x
-
-    @property
-    def height(self) -> int: return self._height
-
-    @property
-    def width(self) -> int: return self._width
 
     @property
     def max_scroll(self) -> int: return len(self._line_buf) - self._height
@@ -168,7 +183,7 @@ class Application:
         self._bottom_bar = curses.newwin(*self._panel_sizes["bottom"], curses.LINES - 3, 26)
         self._left_panel_bottom_bar = curses.newwin(*self._panel_sizes["left_bottom"], curses.LINES - 3, 0)
         self._top_bar = curses.newwin(*self._panel_sizes["top"], 0, 26)
-        self._main_panel = ScrollablePad(3, 26, *self._panel_sizes["main"])
+        self._main_panel = ScrollablePad(self._stdscr, 3, 26, *self._panel_sizes["main"])
         self._stdscr.refresh()
         self._stdscr.nodelay(True)
 
@@ -318,10 +333,10 @@ class Application:
         textbox_x = self._panel_sizes["left"][1] + (len(prompt) + 3)
         textbox_y = curses.LINES - 2
         textbox = ScrollingTextBox(self._stdscr, textbox_y, textbox_x, textbox_width)
-        self._stdscr.refresh()
-        inputted = textbox.input()
+        textbox.display()
+        textbox.input()
         self._draw_bottom_bar()
-        return inputted
+        return textbox.contents
 
     def _add_new_contact(self):
         """Add a new contact with user supplied nickname and client ID"""
