@@ -83,7 +83,7 @@ class ScrollingTextBox(UIComponent):
 
 class ScrollablePad(UIComponent):
     """A vertically scrollable text pad"""
-    MAXLINES = 300000
+    MAXLINES = 30000
     def __init__(self, screen: curses.window, y: int, x: int, height: int, width: int):
         """Construct a ScrollablePad
         
@@ -96,7 +96,6 @@ class ScrollablePad(UIComponent):
         super().__init__(screen, y, x, height, width, self.MAXLINES, width)
         self.scroll = 0
         self._line_buf = []
-        self.pad = curses.newpad(self.MAXLINES, width)
     
     @property
     def num_lines(self) -> int: return len(self._line_buf)
@@ -107,10 +106,14 @@ class ScrollablePad(UIComponent):
     def display(self):
         """Redraw the pad on the screen to reflect the current contents."""
         top_line = max(0, self.num_lines - self._height - self.scroll)
-        self.pad.clear()
+        self._pad.clear()
         for i, v in enumerate(self._line_buf):
-            self.pad.addstr(i, 1, v)
-        self.pad.refresh(top_line, 0, self._y, self._x, self._y + self._height, self._x + self._width)
+            self._pad.addstr(i, 1, v)
+        self._pad.refresh(
+            top_line, 0, 
+            self._y, self._x, 
+            self._y + self._height, self._x + self._width
+        )
 
     def add_string(self, string: str):
         """Append a string to the end of the pad.
@@ -147,7 +150,7 @@ class ScrollablePad(UIComponent):
 
     def clear(self):
         """Delete all contents from the pad."""
-        self.pad.clear()
+        self._pad.clear()
         self.scroll = 0
         self._line_buf.clear()
 
@@ -264,11 +267,13 @@ class Application:
         """Draw the left panel containing the user's contacts."""
         self._left_panel.clear()
         self._left_panel.addstr(1, 1, "Contacts: ")
+        focused_line = 0
         for i, contact in enumerate(self._contacts):
             contact_name, is_group = contact
             display_name = contact_name
             if contact_name == self._focused_user:
                 display_name = f"[{display_name}]"
+                focused_line = i + 2
             if is_group:
                 display_name = f"%{display_name}"
             if contact_name in self._new_message and self._new_message[contact_name]:
@@ -279,7 +284,12 @@ class Application:
             self._left_panel.addstr(i + 2, 1, display_name)
 
         self._left_panel.border()
-        self._left_panel.refresh(0, 0, 0, 0, curses.LINES - 3, 26)
+        self._left_panel.refresh(
+            0, max(
+                0, focused_line - self._panel_sizes["left"][0] - 1
+                ),
+            0, 0,
+            curses.LINES - 3, 26)
 
     def _create_group(self):
         """Prompt the user to create a group chat."""
