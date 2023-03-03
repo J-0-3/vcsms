@@ -42,7 +42,7 @@ class ScrollingTextBox:
                 if len(entered) > self._width:
                     scroll -= 1
                 entered = entered[:-1]
-            else:
+            elif len(key) == 1:
                 entered += key
                 if len(entered) > self._width:
                     scroll += 1
