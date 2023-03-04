@@ -136,7 +136,7 @@ class Client_DB:
         name_hash = sha256.hash_hex(group_name.encode('utf-8') + self._name_salt)
         self._cached_groupname_plaintexts[(encrypted_group_name, iv)] = group_name
         self._cached_groupname_hashes[group_name] = name_hash
-        self._db.execute("INSERT INTO groups (id, hash, ciphertext, iv, owner_id) VALUES (?, ?, ?, ?)", 
+        self._db.execute("INSERT INTO groups (id, hash, ciphertext, iv, owner_id) VALUES (?, ?, ?, ?, ?)", 
                          (hex(group_id), name_hash, encrypted_group_name, hex(iv), owner_id))
         for member in members:
             self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), member))

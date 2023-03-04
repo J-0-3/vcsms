@@ -39,7 +39,7 @@ INCOMING_MESSAGE_TYPES = {
     "IndexInUse": ([int], [10]),
     "MessageDataDecryptionFailure": ([int], [10]),
     "MessageDataMalformed" :([int], [10]),
-    "InvalidSignature": ([int], [10]),
+    "InvalidSignature": ([str, int], ['utf-8', 10]),
     "NoSuchIndex": ([int], [10]),
     # message type
     "UnknownMessageType": ([str], ['utf-8']),
@@ -75,9 +75,10 @@ OUTGOING_MESSAGE_TYPES = {
     "IndexInUse": ([int], [10]),
     "MessageDataDecryptionFailure": ([int], [10]),
     "MessageDataMalformed": ([int], [10]),
-    "InvalidSignature": ([int], [10]),
     "NoSuchIndex": ([int], [10]),
     "ResendAuthPacket": ([int], [10]),
+    # message type, message index
+    "InvalidSignature": ([str, int], ['utf-8', 10]),
     # request index, client id (server only)
     "GetKey": ([int, str], [10, 'utf-8']),
     # client id, exponent, modulus (server only)
@@ -144,6 +145,7 @@ class Client:
             "GroupIDInUse": self._handler_group_id_in_use,
             "RenameGroup": self._handler_rename_group,
             "LeaveGroup": self._handler_leave_group,
+            "InvalidSignature": self._handler_invalid_signature,
             "unknown": self._handler_unknown,
             "default": self._handler_default
         }
@@ -645,7 +647,7 @@ class Client:
             return None
         db.close()
         self._logger.log(f"Invalid signature in group creation request.", 2)
-        return "InvalidSignature", (group_id, )
+        return "InvalidSignature", ("CreateGroup", group_id, )
 
     def _handler_leave_group(self, sender: str, group_id: int, signature: bytes) -> None | tuple[str, tuple]:
         """Handler function for the LeaveGroup message type.
@@ -673,7 +675,7 @@ class Client:
                     self._logger.log(f"Removing {sender} from {group_id} as they left.", 4)
                     db.remove_group_member(group_id, sender)
                     return None
-                return "InvalidSignature", (group_id, )
+                return "InvalidSignature", ("LeaveGroup", group_id, )
             return "NotAllowed", ("LeaveGroup", )
         return "NoSuchGroup", (group_id, )
 
@@ -709,7 +711,7 @@ class Client:
                     self._logger.log("Renamed group {group_id}", 2)
                     self._message_queue.push(("RENAMEGROUP", (old_name, name_decrypted)))
                     return None
-                return "InvalidSignature", (group_id, )
+                return "InvalidSignature", ("RenameGroup", group_id, )
             return "NotAllowed", ("RenameGroup", )
         return "NoSuchGroup", (group_id, )
 
@@ -754,7 +756,7 @@ class Client:
                     self._logger.log(f"Requesting members of group {group_id} change their group IDs in response to ID in use error.", 3)
                     return "ChangeGroupID", (group_id, new_group_id, response_signature)
                 self._logger.log(f"Invalid signature for ID in use error.", 2)
-                return "InvalidSignature", (group_id, )
+                return "InvalidSignature", ("GroupIDInUse", group_id, )
             self._logger.log(f"ID in use error from user who is not part of the group, or for a group I am not the owner of.", 2)
             return "NotAllowed", ("GroupIDInUse", )
         self._logger.log(f"ID in use error for non-existent group {group_id}.", 2)
@@ -796,7 +798,7 @@ class Client:
                     self._logger.log(f"Changed group ID {old_id} to {new_id}", 3)
                     return None
                 self._logger.log(f"Invalid new group info signature from {sender}.", 2)
-                return "InvalidSignature", (old_id, )
+                return "InvalidSignature", ("ChangeGroupID", old_id, )
             self._logger.log(f"{sender} tried to change the ID of a non-existent group.", 2)
             return "NoSuchGroup", (old_id, )
         self._logger.log(f"Unauthorised group ID change request.", 2)
@@ -889,7 +891,7 @@ class Client:
             db.close()
             self._logger.log(
                 f"Invalid Diffie Hellman signature from {sender}", 1)
-            return "InvalidSignature", (message_index, )
+            return "InvalidSignature", ("NewMessage", message_index, )
 
         db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])
@@ -901,6 +903,7 @@ class Client:
 
         self._messages[message_index] = {
             "client_id": sender,
+            "public_key": sender_dh_pub,
             "encryption_key": encryption_key 
             }
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
@@ -939,7 +942,7 @@ class Client:
             if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
                 db.close()
                 self._logger.log(f"Invalid public key signature from {sender}", 1)
-                return "InvalidSignature", (message_index, )
+                return "InvalidSignature", ("MessageAccept", message_index, )
             db.close()
             if "dh_private" not in self._messages[message_index]:
                 self._logger.log("{sender} attempted to accept a message that they sent.", 2)
@@ -1047,6 +1050,83 @@ class Client:
             self._logger.log(f"{sender} reported index in use for message with other user", 2)
             return "NotAllowed", ("IndexInUse", )
         return "NoSuchIndex", (message_index, )
+
+    def _handler_invalid_signature(self, sender: str, message_type: str, identifier: int):
+        if message_type == "NewMessage":
+            if identifier in self._messages:
+                message = self._messages[identifier]
+                if sender == message["client_id"]:
+                    new_private_key = random.randrange(2, self._dhke_group[1])
+                    new_pub, sig = signing.gen_signed_dh(new_private_key, self._priv, self._dhke_group, identifier)
+                    message["dh_private"] = new_private_key
+                    return "NewMessage", (identifier, new_pub, sig)
+                return "NotAllowed", ("InvalidSignature", )
+            return "NoSuchIndex", (identifier, )
+
+        elif message_type == "MessageAccept":
+            if identifier in self._messages:
+                message = self._messages[identifier]
+                if sender == message["client_id"]:
+                    new_private_key = random.randrange(2, self._dhke_group[1])
+                    new_pub, sig = signing.gen_signed_dh(new_private_key, self._priv, self._dhke_group, identifier)
+                    shared_secret = dhke.calculate_shared_key(
+                        new_private_key, message["public_key"], self._dhke_group
+                    )
+                    message["encryption_key"] = sha256.hash(i_to_b(shared_secret))
+                    return "MessageAccept", (identifier, new_pub, sig)
+                return "NotAllowed", ("InvalidSignature", )
+            return "NoSuchIndex", (identifier, )
+
+        elif message_type == "CreateGroup":
+            db = self._db_connect()
+            if (members := db.get_members_by_id(identifier)):
+                if sender in members:
+                    if not db.user_known(sender):
+                        self._request_key(sender)
+                        if not self._await_key(sender, 60, lambda: None):
+                            self._logger.log(f"Could not resend CreateGroup to {sender}, public key timeout.", 2)
+                            return None
+                    key = db.get_key(sender)
+                    group_name = db.get_group_name(identifier)
+                    if group_name is None:
+                        self._logger.log(f"Likely Database corruption. No group name for {identifier} but group does have members.", 1)
+                        return None
+                    encrypted_group_name = rsa.encrypt(group_name.encode('utf-8'), *key)
+                    signature_data = f"CREATE{group_name}:{hex(identifier)}:{''.join(members)}:{sender}".encode('utf-8')
+                    signature = signing.sign(signature_data, self._priv)
+                    return "CreateGroup", (encrypted_group_name, signature, identifier, members)
+                return "NotAllowed", ("InvalidSignature", )
+            return "NoSuchGroup", (identifier, )
+
+        elif message_type == "RenameGroup":
+            db = self._db_connect()
+            if (members := db.get_members_by_id(identifier)):
+                if sender in members:
+                    group_name = db.get_group_name(identifier)
+                    if group_name is None:
+                        self._logger.log(f"Likely database corruption. No group name for {identifier} but group does have members.", 1)
+                        return None
+                    signature_data = f"RENAME{group_name}{identifier}{sender}".encode('utf-8')
+                    signature = signing.sign(signature_data, self._priv)
+                    if not db.user_known(sender):
+                        self._request_key(sender)
+                        if not self._await_key(sender, 60, lambda: None):
+                            self._logger.log(f"Could not resend RenameGroup to {sender}. Public key timeout.", 2)
+                            return None
+                    key = db.get_key(sender)
+                    encrypted_group_name = rsa.encrypt(group_name.encode('utf-8'), *key)
+                    return "RenameGroup", (identifier, encrypted_group_name, signature)
+                return "NotAllowed", ("InvalidSignature", )
+            return "NoSuchGroup", (identifier, )
+
+        elif message_type == "LeaveGroup":
+            db = self._db_connect()
+            if members := db.get_members_by_id(identifier):
+                return "NotAllowed", ("InvalidSignature", )
+            signature_data = f"LEAVE{identifier}{sender}".encode('utf-8')
+            signature = signing.sign(signature_data, self._priv)
+            return "LeaveGroup", (identifier, signature)
+        return None
 
     def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:
         """Handler function for unknown message types.

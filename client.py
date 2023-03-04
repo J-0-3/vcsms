@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import curses
-import curses.textpad
 import argparse
 import json
 import os
@@ -48,7 +47,7 @@ class UIComponent:
 class ScrollingTextBox(UIComponent):
     """A simple one line horizontal scrolling text input box"""
     MAXCHARS = 16384
-    def __init__(self, window: curses.window, y: int, x: int, width: int, border: bool):
+    def __init__(self, window: curses.window, y: int, x: int, width: int):
         """Construct a ScrollingTextBox
         
         Args:
@@ -57,7 +56,7 @@ class ScrollingTextBox(UIComponent):
             x (int): The x coordinate of the top left corner of the box.
             width (int): The width of the textbox.
         """
-        super().__init__(window, y, x, 1, width, 1, self.MAXCHARS, border)
+        super().__init__(window, y, x, 1, width, 1, self.MAXCHARS, False)
         self._scroll = 0
         self._contents = ""
 
@@ -70,10 +69,10 @@ class ScrollingTextBox(UIComponent):
         self._pad.refresh(0, self._scroll, self._y, self._x, self._y + 1, self._x + self._width)
 
     def input(self):
-        """Accept input from the user in the box until the enter key is pressed.
+        """Accept input from the user until the enter key is pressed.
         
         Returns:
-            str: The text the user entered.
+            str: The text that was entered
         """
         self._screen.nodelay(False)
         while (key := self._screen.getkey()) not in ('\n', "KEY_ENTER"):
@@ -87,6 +86,11 @@ class ScrollingTextBox(UIComponent):
                     self._scroll += 1
             self.display()
         self._screen.nodelay(True)
+        return self._contents
+    
+    def clear(self):
+        self._contents = ""
+        self.display()
 
 class ScrollablePad(UIComponent):
     """A vertically scrollable text pad"""
@@ -359,7 +363,7 @@ class Application:
         textbox_width = self._panel_sizes["bottom"][1] - (len(prompt) + 3)
         textbox_x = self._panel_sizes["left"][1] + (len(prompt) + 3)
         textbox_y = curses.LINES - 2
-        textbox = ScrollingTextBox(self._stdscr, textbox_y, textbox_x, textbox_width, False)
+        textbox = ScrollingTextBox(self._stdscr, textbox_y, textbox_x, textbox_width)
         textbox.display()
         textbox.input()
         self._draw_bottom_bar()
