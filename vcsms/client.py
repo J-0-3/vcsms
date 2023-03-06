@@ -790,7 +790,7 @@ class Client:
                         return None
                 if signing.verify(signature_data, signature, db.get_key(sender)):
                     if db.get_group_name(new_id):
-                        response_signature_data = f"IDINUSE{new_id}{self._id}".encode('utf-8')
+                        response_signature_data = f"IDINUSE{new_id}{sender}".encode('utf-8')
                         response_signature = signing.sign(response_signature_data, self._priv)
                         self._logger.log(f"{sender} tried to change a group ID to one already in use.", 3)
                         return "GroupIDInUse", (new_id, response_signature)
@@ -798,7 +798,8 @@ class Client:
                     self._logger.log(f"Changed group ID {old_id} to {new_id}", 3)
                     return None
                 self._logger.log(f"Invalid new group info signature from {sender}.", 2)
-                return "InvalidSignature", ("ChangeGroupID", old_id, )
+                combined_ids = (old_id << 64) ^ new_id
+                return "InvalidSignature", ("ChangeGroupID", combined_ids, )
             self._logger.log(f"{sender} tried to change the ID of a non-existent group.", 2)
             return "NoSuchGroup", (old_id, )
         self._logger.log(f"Unauthorised group ID change request.", 2)
@@ -905,7 +906,7 @@ class Client:
             "client_id": sender,
             "public_key": sender_dh_pub,
             "encryption_key": encryption_key 
-            }
+        }
         return "MessageAccept", (message_index, dh_pub, dh_pub_sig)
 
     def _handler_message_accept(self, sender: str, message_index: int,
@@ -1121,11 +1122,42 @@ class Client:
 
         elif message_type == "LeaveGroup":
             db = self._db_connect()
-            if members := db.get_members_by_id(identifier):
+            if db.get_group_name(identifier):
                 return "NotAllowed", ("InvalidSignature", )
             signature_data = f"LEAVE{identifier}{sender}".encode('utf-8')
             signature = signing.sign(signature_data, self._priv)
             return "LeaveGroup", (identifier, signature)
+
+        elif message_type == "GroupIDInUse":
+            db = self._db_connect()
+            if db.get_owner(identifier) not in (sender, None):
+                signature_data = f"IDINUSE{identifier}{sender}".encode('utf-8')
+                signature = signing.sign(signature_data, self._priv)
+                return "GroupIDInUse", (identifier, signature)
+            return "NotAllowed", ("InvalidSignature", )
+        
+        elif message_type == "ChangeGroupID":
+            old_id = identifier >> 64
+            new_id = identifier % 2**64
+            db = self._db_connect()
+            if members := db.get_members_by_id(new_id):
+                if (sender in members 
+                    and 
+                    db.get_owner(new_id) == self._id 
+                    and 
+                    not (
+                        db.get_group_name(old_id) is not None
+                        and 
+                        db.get_owner(old_id) == self._id
+                        and
+                        sender in db.get_members_by_id(old_id)
+                    )):
+                    signature_data = f"CHANGEID{old_id}{new_id}{sender}".encode('utf-8')
+                    signature = signing.sign(signature_data, self._priv)
+                    return "ChangeGroupID", (old_id, new_id, signature)
+                return "NotAllowed", ("InvalidSignature", )
+            return "NoSuchGroup", (new_id, )
+            
         return None
 
     def _handler_unknown(self, sender: str, message_type: str, values: list) -> tuple[str, tuple]:
