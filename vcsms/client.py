@@ -378,7 +378,7 @@ class Client:
         if db.get_group_id(name) or db.get_id(name):
             self._logger.log(f"Name {name} already in use.", 1)
             raise GroupNameInUseException(name)
-        self._logger.log(f"Creating group {name}: id = {group_id}, members = {member_ids}", 1)
+        self._logger.log(f"Creating group: id = {group_id}, members = {member_ids}", 1)
 
         db.create_group(name, group_id, self._id, member_ids)
 
