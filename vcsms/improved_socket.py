@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 from .queue import Queue
+from .exceptions.socket import *
 
 
 class ImprovedSocket:
@@ -29,12 +30,11 @@ class ImprovedSocket:
         """
         while self._open:
             time.sleep(1)
-            self._send_lock.acquire()
             try:
-                self._sock.sendall(b'\xfe')
+                with self._send_lock:
+                    self._sock.sendall(b'\xfe')
             except OSError:
-                self._open = False
-            self._send_lock.release()
+                self.close()
 
     def _in_thread(self):
         """Receives incoming data, parses it, and
@@ -50,8 +50,8 @@ class ImprovedSocket:
                         self._incoming_in_progress = b''
                     elif byte != b'\xfe':
                         self._incoming_in_progress += byte
-            except OSError:
-                self._open = False
+            except (OSError, BrokenPipeError):
+                self.close()
             
     def connect(self, addr: str, port: int):
         """Connect to a port on a given ip address.
@@ -60,18 +60,25 @@ class ImprovedSocket:
             addr (str): The ip address to connect to.
             port (int): The port on the target device to connect to.
         """
-        self._sock.connect((addr, port))
+        try:
+            self._sock.connect((addr, port))
+        except OSError as exc:
+            if exc.errno == 106:
+                raise SocketAlreadyConnectedException()
+            raise ConnectionFailureException()
+        except ConnectionRefusedError:
+            raise ConnectionFailureException()
 
     def close(self):
         """Close the connection and shutdown the socket."""
-        self._open = False
-        self._send_lock.acquire()
-        try:
-            self._sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass  # connection has already closed
-        self._sock.close()
-        self._send_lock.release()
+        if self._open:
+            self._open = False
+            with self._send_lock:
+                try:
+                    self._sock.shutdown(socket.SHUT_RDWR)
+                except (OSError, BrokenPipeError):
+                    pass  # connection has already closed
+                self._sock.close()
 
     @property
     def connected(self) -> bool:
@@ -88,9 +95,15 @@ class ImprovedSocket:
         Args:
             data (bytes): The payload to send.
         """
-        self._send_lock.acquire()
-        self._sock.sendall(data + b'\xff')
-        self._send_lock.release()
+        if self.connected:
+            try:
+                with self._send_lock:
+                    self._sock.sendall(data + b'\xff')
+            except (OSError, BrokenPipeError) as exc:
+                self.close()
+                raise DisconnectedException()
+        else:
+            raise NotConnectedException()
 
     def recv(self) -> bytes:
         """Block until a new piece of data is available and then return it.
@@ -98,7 +111,9 @@ class ImprovedSocket:
         Returns:
             bytes: The received piece of data.
         """
-        return self._queue.pop()
+        if self.connected:
+            return self._queue.pop()
+        raise NotConnectedException()
 
     @property
     def new(self) -> bool:
@@ -112,8 +127,11 @@ class ImprovedSocket:
     def run(self):
         """Start the socket listening for incoming data. 
         This must be called before any data can be received from the socket."""
-        t_in = threading.Thread(target=self._in_thread, args=())
-        t_life = threading.Thread(target=self._checklife_thread, args=())
-        self._open = True
-        t_in.start()
-        t_life.start()
+        if not self._open:
+            t_in = threading.Thread(target=self._in_thread, args=())
+            t_life = threading.Thread(target=self._checklife_thread, args=())
+            self._open = True
+            t_in.start()
+            t_life.start()
+        else:
+            raise SocketAlreadyConnectedException()

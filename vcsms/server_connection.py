@@ -10,6 +10,7 @@ from .logger import Logger
 from .cryptography import dhke, sha256, utils, aes256
 from .cryptography.exceptions import DecryptionFailureException
 from .exceptions.server_connection import *
+from .exceptions.socket import SocketException
 
 
 class ServerConnection:
@@ -33,7 +34,6 @@ class ServerConnection:
         self._encryption_key = 0
         self._in_queue = Queue()
         self._out_queue = Queue()
-        self._connected = False
         self._send_lock = threading.Lock()
 
     @property
@@ -43,7 +43,7 @@ class ServerConnection:
         Returns:
             bool: whether the connection is currently open
         """
-        return self._connected
+        return self._socket.connected
 
     def _handshake(self, pub_key: tuple[int, int], priv_key: tuple[int, int], dhke_group: tuple[int, int]=dhke.group16_4096):
         """Handshake to the server to setup an encrypted connection.
@@ -145,11 +145,13 @@ class ServerConnection:
         """
         try:
             self._socket.connect(self._ip, self._port)
-        except OSError as exc:
+        except SocketException as exc:
             raise NetworkError(exc)
         self._socket.run()
-        self._handshake(pub_key, priv_key, dhke.group14_2048)
-        self._connected = True
+        try:
+            self._handshake(pub_key, priv_key, dhke.group14_2048)
+        except SocketException as exc:
+            raise NetworkError(exc)
         t_in = threading.Thread(target=self._in_thread, args=())
         t_out = threading.Thread(target=self._out_thread, args=())
         t_in.start()
@@ -157,9 +159,13 @@ class ServerConnection:
 
     def _in_thread(self):
         """A function to be run by a thread which receives, parses and decrypts messages from the server."""
-        while self._connected:
+        while self._socket.connected:
             if self._socket.new:
-                data = self._socket.recv()
+                try:
+                    data = self._socket.recv()
+                except SocketException as exc:
+                    self._logger.log(f"Connection to server died: {exc.message}", 1)
+                    continue
                 try:
                     iv, data = data.split(b':')
                 except ValueError:
@@ -180,27 +186,30 @@ class ServerConnection:
     def _out_thread(self):
         """A function to be run by a thread which encrypts, formats 
         and sends messages in the outgoing queue to the server."""
-        while self._connected:
+        while self._socket.connected:
             if not self._out_queue.empty:
-                self._send_lock.acquire()
-                message = self._out_queue.pop()
-                iv = random.randrange(1, 2 ** 128)
-                encrypted = aes256.encrypt_cbc(message, self._encryption_key, iv)
-                self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
-                self._send_lock.release()
+                with self._send_lock:
+                    message = self._out_queue.pop()
+                    iv = random.randrange(1, 2 ** 128)
+                    encrypted = aes256.encrypt_cbc(message, self._encryption_key, iv)
+                    try:
+                        self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
+                    except SocketException as exc:
+                        self._logger.log(f"Connection to server died: {exc.message}")
+                        continue
 
     def close(self):
         """Shutdown the connection to the server once all queued messages have been sent."""
-        self._logger.log("Trying to close connection to server", 3)
-        while True:
-            if self._out_queue.empty:
-                self._send_lock.acquire()
-                self._logger.log("Able to close connection", 3)
-                self._connected = False
-                self._socket.close()
-                self._logger.log("Closed connection to server", 2)
-                self._send_lock.release()
-                break
+        if self._socket.connected:
+            self._logger.log("Trying to close connection to server", 3)
+            while True:
+                if self._out_queue.empty:
+                    with self._send_lock:
+                        self._logger.log("Able to close connection", 3)
+                        self._socket.close()
+                        self._logger.log("Closed connection to server", 2)
+                    break
+        self._logger.log("Connection to server already closed", 2)
 
     def send(self, data: bytes):
         """Queue some data to be sent to the server.
@@ -208,7 +217,11 @@ class ServerConnection:
         Args:
             data (bytes): The bytes of the message to send.
         """
-        self._out_queue.push(data)
+        if self._socket.connected:
+            self._out_queue.push(data)
+        else:
+            raise NetworkError("Not connected.")
+
 
     def recv(self) -> bytes:
         """Block until a new piece of data is available from the connection and then return it.
@@ -216,7 +229,10 @@ class ServerConnection:
         Returns:
             bytes: The data received from the server.
         """
-        return self._in_queue.pop()
+        if self._socket.connected:
+            return self._in_queue.pop()
+        else:
+            raise NetworkError("Not connected.")
 
     @property
     def new(self) -> bool:

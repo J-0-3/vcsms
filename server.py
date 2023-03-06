@@ -11,10 +11,11 @@ from vcsms.cryptography.exceptions import DecryptionFailureException
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("directory", type=str, help="The directory in which to store all the server's files")
-    parser.add_argument("-o", "--config-out", type=str, help="A location to output the server's connection file to")
-    parser.add_argument("-i", "--interface", type=str, help="The IP address of the network interface to run on. (Default 127.0.0.1)", default="127.0.0.1")
-    parser.add_argument("-p", "--port", type=int, help="The port for the service to listen on. (Default 6000)", default=6000)
+    parser.add_argument("-d", "--directory", type=str, default="vcsms_server", help="the directory in which to store all the server's files")
+    parser.add_argument("-o", "--config-out", type=str, help="a location to output the server's connection file to")
+    parser.add_argument("-i", "--interface", type=str, help="the IP address of the network interface to run on. (Default 127.0.0.1)", default="127.0.0.1")
+    parser.add_argument("-p", "--port", type=int, help="the port for the service to listen on. (Default 6000)", default=6000)
+    parser.add_argument("-l", "--loglevel", type=int, default=5, help="the verbosity of the server log file")
     args = parser.parse_args()
     server_directory = args.directory
     key_directory = os.path.join(server_directory, "keys")
@@ -35,6 +36,8 @@ if __name__ == "__main__":
         print("Private key password incorrect. Try again.")
         quit()
 
+    print(f"The server's fingerprint is:\n{keys.fingerprint(pub, 64)}")
+    print("(clients will need this to connect to the server without using a config file)")
     if args.config_out:
         with open(args.config_out, 'w', encoding='utf-8') as f:
             json.dump({
@@ -43,7 +46,8 @@ if __name__ == "__main__":
                 "fingerprint": keys.fingerprint(pub, 64)
             }, f)
         print(f"Config file created at: {os.path.abspath(args.config_out)}.")
-        print("Edit it to reflect your publically facing IP.")
+        print("Clients can use this file to connect to the server.")
+        print("Edit it to reflect your publically facing IP.\n")
 
     logger = Logger(5, log_path)
     server = Server(args.interface, args.port, (pub, priv), database_path, key_directory, logger)

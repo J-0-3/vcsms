@@ -255,7 +255,7 @@ class Application:
             self._bottom_bar.addstr(1, 1, message, curses.color_pair(color_pair))
         else:
             instructions = ""
-            if self._focused_user:
+            if self._focused_user_name:
                 instructions += "(n)ew msg (r)ename (d)elete (c)reate grp "
             instructions += "(a)dd (q)uit "
             if self._main_panel.scroll > 0:
@@ -293,13 +293,13 @@ class Application:
         for i, contact in enumerate(self._contacts):
             contact_name, is_group = contact
             display_name = contact_name
-            if contact_name == self._focused_user:
+            if contact_name == self._focused_user_name:
                 display_name = f"[{display_name}]"
                 focused_line = i + 2
             if is_group:
                 display_name = f"%{display_name}"
             if contact_name in self._new_message and self._new_message[contact_name]:
-                if contact_name == self._focused_user:
+                if contact_name == self._focused_user_name:
                     self._new_message[contact_name] = False
                 else:
                     display_name = f"*{display_name}"
@@ -331,8 +331,8 @@ class Application:
 
         self._contacts = self._client.contacts
         self._draw_left_panel()
-        if not self._focused_user:
-            self._focused_user = name
+        if not self._focused_user_name:
+            self._focused_user_name = name
             self._draw_bottom_bar()
 
     def _draw_main_panel(self, reload_messages = False):
@@ -341,10 +341,10 @@ class Application:
         """
         if reload_messages:
             self._main_panel.clear()
-            self._message_buffer = self._client.get_messages(self._focused_user)[:ScrollablePad.MAXLINES][::-1]
+            self._message_buffer = self._client.get_messages(self._focused_user_name)[:ScrollablePad.MAXLINES][::-1]
             for message, sender in self._message_buffer:
                 if sender == self._id:
-                    self._main_panel.add_string(f"TO {self._focused_user}: {message.decode('utf-8')}")
+                    self._main_panel.add_string(f"TO {self._focused_user_name}: {message.decode('utf-8')}")
                 else:
                     self._main_panel.add_string(f"FROM {sender}: {message.decode('utf-8')}")
         self._main_panel.display()
@@ -380,8 +380,8 @@ class Application:
             return
 
         self._contacts = self._client.contacts
-        if self._focused_user == client_id or not self._focused_user:
-            self._focused_user = nickname
+        if self._focused_user_name == client_id or not self._focused_user_name:
+            self._focused_user_name = nickname
         else:
             self._draw_left_panel()  # setting focused user does this automatically but needs to be done.
 
@@ -391,11 +391,11 @@ class Application:
         Cancelled if the user does not enter a message or there is no
         currently focused user.
         """
-        if self._focused_user:
+        if self._focused_user_name:
             message = self._ask_input("Message")
             if message:
                 try:
-                    self._client.send(self._focused_user, message.encode())
+                    self._client.send(self._focused_user_name, message.encode())
                 except ClientException as e:
                     self._flash_error(e.message)
                     return
@@ -406,31 +406,31 @@ class Application:
 
         Cancelled if the user does not enter a name.
         """
-        if self._focused_user:
+        if self._focused_user_name:
             new_name = self._ask_input("New Name")
             if new_name:
                 try:
-                    self._client.rename_contact(self._focused_user, new_name)
+                    self._client.rename_contact(self._focused_user_name, new_name)
                 except ClientException as e:
                     self._flash_error(e.message)
                 self._contacts = self._client.contacts
-                self._focused_user = new_name
+                self._focused_user_name = new_name
 
     def _delete_contact(self):
-        if self._focused_user:
-            confirm = self._ask_input(f"Delete {self._focused_user}? (y/N)")
+        if self._focused_user_name:
+            confirm = self._ask_input(f"Delete {self._focused_user_name}? (y/N)")
             if confirm.lower() in {'y', 'yes'}:
-                self._client.delete_contact(self._focused_user)
+                self._client.delete_contact(self._focused_user_name)
                 self._contacts = self._client.contacts
                 if len(self._contacts) > 0:
-                    self._focused_user = self._contacts[0][0]
+                    self._focused_user_name = self._contacts[0][0]
                 else:
-                    self._focused_user = ""
+                    self._focused_user_name = ""
 
     def _cycle_focused_user(self, increment: int):
-        if self._focused_user:
+        if self._focused_user_name:
             next_index = (self._focused_user_index + increment) % len(self._contacts)
-            self._focused_user = self._contacts[next_index][0]
+            self._focused_user_name = self._contacts[next_index][0]
             self._focused_user_index = next_index
 
     @property
@@ -454,7 +454,7 @@ class Application:
         if curses.COLS < 102 or curses.LINES < 9:
             self._client.quit()
             raise Exception("Window too small. Resize your terminal.")
-        if self._focused_user:
+        if self._focused_user_name:
             self._draw_main_panel(True)
             self._draw_bottom_bar()
         else:
@@ -470,18 +470,28 @@ class Application:
                 last_poll = time.time()
                 while self._client.new:
                     event, info = self._client.receive()
-                    if event == "MESSAGE":
+                    if event == "ERROR":
+                        self._flash_error(info)
+                    
+                    elif event == "DISCONNECT":
+                        self._flash_error("Server unexpectedly closed the connection.")
+                        self._flash_error("Shutting down program...")
+                        self._running = False
+                        break
+
+                    elif event == "MESSAGE":
                         sender, group, _ = info
                         contact_name = group or sender
                         self._new_message[contact_name] = True
-                        if self._focused_user == contact_name:
+                        if self._focused_user_name == contact_name:
                             self._draw_main_panel(True)
                             self._draw_bottom_bar()
                         if (contact_name, bool(group)) not in self._contacts:
                             self._contacts.append((contact_name, bool(group)))
-                        if not self._focused_user:
-                            self._focused_user = contact_name
+                        if not self._focused_user_name:
+                            self._focused_user_name = contact_name
                         self._draw_left_panel()
+
                     else:
                         self._contacts = self._client.contacts
                         if event == "RENAMEGROUP":
@@ -489,15 +499,16 @@ class Application:
                             if old_name in self._new_message and self._new_message[old_name]:
                                 self._new_message.pop(old_name)
                                 self._new_message[new_name] = True
-                            if self._focused_user == old_name:
-                                self._focused_user = new_name
+                            if self._focused_user_name == old_name:
+                                self._focused_user_name = new_name
 
                         elif event == "DELETEGROUP":
-                            if self._focused_user == info:
+                            if self._focused_user_name == info:
                                 if len(self._contacts) > 0:
-                                    self._focused_user = self._contacts[0][0]
+                                    self._focused_user_name = self._contacts[0][0]
                                 else:
-                                    self._focused_user = ""
+                                    self._focused_user_name = ""
+                        
                         self._draw_left_panel()
                         self._draw_main_panel(True)
             self._handle_input()
@@ -526,12 +537,12 @@ class Application:
             case 'h':
                 self._cycle_focused_user(-1)
             case 'j':
-                if self._focused_user:
+                if self._focused_user_name:
                     self._main_panel.scroll_down(1)
                     self._draw_main_panel()
                     self._draw_bottom_bar()
             case 'k':
-                if self._focused_user:
+                if self._focused_user_name:
                     self._main_panel.scroll_up(1)
                     self._draw_main_panel()
                     self._draw_bottom_bar()
@@ -544,9 +555,12 @@ def run(stdscr: curses.window, client: Client):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("config", type=str, help="The server's .vcsms config file")
-    parser.add_argument("-d", "--directory", type=str, default="vcsms", help="Where to store application-generated files")
-    parser.add_argument("-p", "--password", type=str, help="The application master password")
+    parser.add_argument("-d", "--directory", type=str, default="vcsms_client", help="where to store application-generated files")
+    parser.add_argument("-P", "--password", type=str, help="the application master password")
+    parser.add_argument("-c", "--config", type=str, help="the server's .vcsms config file (ignores -i, -p and -f)")
+    parser.add_argument("-i", "--ip", type=str, help="the server's IP address (must be used in combination with -p and -f)")
+    parser.add_argument("-p", "--port", type=str, help="the server's port (must be used in combination with -i and -f)")
+    parser.add_argument("-f", "--fingerprint", type=str, help="the server's fingerprint (must be used in combination with -i and -p)")
     args = parser.parse_args()
     with open(args.config, 'r', encoding='utf-8') as conf:
         serverconf = json.load(conf)

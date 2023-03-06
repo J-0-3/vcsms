@@ -236,7 +236,14 @@ class Client:
                 key = db.get_key(member)
                 encrypted_group_name = rsa.encrypt(new_name.encode('utf-8'), *key)
                 message = self._message_parser.construct_message(member, "RenameGroup", gid, encrypted_group_name, signature)
-                self._server.send(message)
+                try:
+                    self._server.send(message)
+                except ConnectionException as exc:
+                    self._logger.log(f"Could not send RenameGroup to {member}: {exc.message}", 2)
+                    self._message_queue.push(("ERROR", "Failed to rename group for 1 or more users."))
+                    self._handle_disconnect()
+                    db.close()
+                    return
             db.rename_group(gid, new_name)
         db.close()
 
@@ -254,7 +261,12 @@ class Client:
                 signature_data = f"LEAVE{gid}{member}".encode('utf-8')
                 signature = signing.sign(signature_data, self._priv)
                 message = self._message_parser.construct_message(member, "LeaveGroup", gid, signature)
-                self._server.send(message)
+                try:
+                    self._server.send(message)
+                except ConnectionException:
+                    self._logger.log(f"Could not inform {member} that I have left group {gid}", 2)
+                    self._handle_disconnect()
+                    break
             db.delete_group_by_group_name(name)
         db.close()
 
@@ -302,8 +314,6 @@ class Client:
             else:
                 self._logger.log(f"User {recipient} not found.", 1)
                 raise UserNotFoundException(recipient)
-        db.insert_message(recipient_id, message, True)
-        db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])
         index = random.randrange(1, 2 ** 64)
         while index in self._messages:
@@ -318,7 +328,14 @@ class Client:
         }
         message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
-        self._server.send(message)
+        try:
+            self._server.send(message)
+            db.insert_message(recipient_id, message, True)
+        except ConnectionException:
+            self._logger.log("Could not send message, connection died.", 1)
+            self._message_queue.push(("ERROR", "Could not send message"))
+            self._handle_disconnect()
+        db.close()
 
     def _group_send(self, group_name: str, message: bytes):
         """Send a message to all recipients in the specified group.
@@ -349,7 +366,12 @@ class Client:
                     "group": group
                 }
                 constructed_message = self._message_parser.construct_message(recipient, "NewMessage", index, dh_pub, dh_sig)
-                self._server.send(constructed_message)
+                try:
+                    self._server.send(constructed_message)
+                except ConnectionException as exc:
+                    self._logger.log(f"Could not send message to group {group}. Connection died.", 1)
+                    self._message_queue.push(("ERROR", "Could not send group message"))
+                    self._handle_disconnect()
 
     def create_group(self, name: str, *members: str):
         """Create a group of users which can be used to send group messages.
@@ -382,6 +404,7 @@ class Client:
 
         db.create_group(name, group_id, self._id, member_ids)
 
+        failure = False
         def invite_user(user: str):
             key = db.get_key(user)
             signature_data = ("CREATE" + name + ":" + hex(group_id) + ":" + ''.join(member_ids) + ":" + user).encode('utf-8')
@@ -391,8 +414,11 @@ class Client:
                 user, "CreateGroup",
                 encrypted_group_name, signature, group_id, member_ids
             )
-            self._server.send(invite_message)
-
+            try:
+                self._server.send(invite_message)
+            except ConnectionException:
+                self._logger.log(f"Could not send CreateGroup message to {user}. Connection died.", 1)
+                failure = True
         for member_id in member_ids:
             if db.user_known(member_id):
                 invite_user(member_id)
@@ -400,6 +426,10 @@ class Client:
                 self._request_key(member_id)
                 await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
                 await_key_thread.start()
+        if failure:
+            self._message_queue.push(("ERROR", "Group creation failed. Group is likely in an unusable state."))
+            self._handle_disconnect()
+
 
     def run(self, password: str):
         """Connect to the VCSMS server and begin running the client program.
@@ -464,11 +494,15 @@ class Client:
 
     def quit(self):
         """Close the connection with the server and shutdown the client program."""
-        self._logger.log("Shutting down client program", 2)
-        self._server.send(self._message_parser.construct_message("0", "Quit"))
-        self._running = False
-        self._server.close()
-        self._save_in_process_messages()
+        if not self._running:
+            self._running = False
+            self._logger.log("Shutting down client program", 2)
+            try:
+                self._server.send(self._message_parser.construct_message("0", "Quit"))
+            except ConnectionException:
+                pass # already disconnected from server
+            self._server.close()
+            self._save_in_process_messages()
 
     def _request_key(self, client_id: str):
         """Request a user's public key from the server.
@@ -481,7 +515,11 @@ class Client:
             request_index = random.randrange(1, 2**64)
         self._key_requests[request_index] = client_id
         message = self._message_parser.construct_message("0", "GetKey", request_index, client_id)
-        self._server.send(message)
+        try:
+            self._server.send(message)
+        except ConnectionException as exc:
+            self._logger.log("Could not request key, disconnected from server", 2)
+            self._handle_disconnect()
 
     def _await_key(self, client_id: str, timeout: int, callback: Callable, *args):
         """Wait until the public key for a given client id is known and then execute
@@ -565,12 +603,18 @@ class Client:
         """The function run by the incoming thread.
         Keeps checking for new messages and processes them on a new thread as they arrive.
         """
-        while self._running:
+        while self._server.connected:
             if self._server.new:
-                msg = self._server.recv()
+                try:
+                    msg = self._server.recv()
+                except ConnectionException as exc:
+                    self._logger.log(f"Could not receive data from server: {exc}", 1)
+                    continue
                 t_process = threading.Thread(
                     target=self._process_message, args=(msg,))
                 t_process.start()
+        if self._running:
+            self._handle_disconnect()
 
     def _process_message(self, data: bytes):
         """The function run by the processing thread for each incoming message.
@@ -589,7 +633,16 @@ class Client:
         response = self._message_parser.handle(
             sender, message_type, message_values)
         if response:
-            self._server.send(response)
+            try:
+                self._server.send(response)
+            except ConnectionException as exc:
+                self._logger.log(f"Failed to send response to {sender}: {exc.message}", 2)
+                self._handle_disconnect()
+
+    def _handle_disconnect(self):
+        """Function to be run when the server unexpectedly closes the connection"""
+        self._message_queue.push(("DISCONNECT", None))
+        self.quit()
 
     # message type handlers
 
@@ -752,7 +805,12 @@ class Client:
                             message = self._message_parser.construct_message(member, "ChangeGroupID",
                                                                              group_id, new_group_id,
                                                                              response_signature)
-                            self._server.send(message)
+                            try:
+                                self._server.send(message)
+                            except ConnectionException as exc:
+                                self._logger.log("Disconnected from server while changing group ID. The group could be left in a semiusable state.", 1)
+                                self._handle_disconnect()
+                                return None
                     response_signature_data = f"CHANGEID{group_id}{new_group_id}{sender}".encode('utf-8')
                     response_signature = signing.sign(response_signature_data, self._priv)
                     self._logger.log(f"Requesting members of group {group_id} change their group IDs in response to ID in use error.", 3)
