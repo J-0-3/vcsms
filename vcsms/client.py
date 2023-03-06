@@ -327,10 +327,10 @@ class Client:
             "data": message.decode('latin1'), # needs to be JSON serialisable
             "group": 0
         }
-        message = self._message_parser.construct_message(
+        constructed_message = self._message_parser.construct_message(
             recipient_id, "NewMessage", index, dh_pub, dh_sig)
         try:
-            self._server.send(message)
+            self._server.send(constructed_message)
             db.insert_message(recipient_id, message, True)
         except ConnectionException:
             self._logger.log("Could not send message, connection died.", 1)
