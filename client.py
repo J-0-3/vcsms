@@ -320,6 +320,9 @@ class Application:
                 user = self._ask_input("User")
                 if not user:
                     break
+                if user == self._id:
+                    self._flash_error("Cannot add yourself to a group")
+                    continue
                 users.append(user)
         
         if len(users) > 0:
@@ -329,11 +332,11 @@ class Application:
                 self._flash_error(e.message)
                 return
 
-        self._contacts = self._client.contacts
-        self._draw_left_panel()
-        if not self._focused_user_name:
-            self._focused_user_name = name
-            self._draw_bottom_bar()
+            self._contacts = self._client.contacts
+            if not self._focused_user_name:
+                self._focused_user_name = name
+                self._draw_bottom_bar()
+            self._draw_left_panel()
 
     def _draw_main_panel(self, reload_messages = False):
         """Draw the main panel containing messages from the

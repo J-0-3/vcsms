@@ -189,10 +189,10 @@ class Client:
             nickname (str): The nickname for the contact.
             client_id (str): The contact's client ID (a 64 char hex string).
         """
-        db = self._db_connect()
         client_id = client_id.strip().lower()
         if re.fullmatch('^[0-9a-f]{32}$', client_id):
             if client_id != self._id:
+                db = self._db_connect()
                 if db.get_id(nickname):
                     self._logger.log(f"Nickname {nickname} is already in use", 1)
                     raise NickNameInUseException(nickname)
@@ -200,9 +200,10 @@ class Client:
                     self._logger.log(f"User {client_id} already exists", 1)
                     raise UserAlreadyExistsException()
                 db.set_nickname(client_id, nickname)
-            db.close()
+                db.close()
+            else:
+                raise ClientException("Cannot add yourself as a contact")
         else:
-            db.close()
             self._logger.log(f"{client_id} does not look like a valid client id.", 1)
             raise InvalidIDException()
 
@@ -393,42 +394,45 @@ class Client:
                         raise UserNotFoundException(member)
                 member_ids.append(member_id)
 
-        group_id = random.randrange(1, 2**64)
-        while db.get_group_name(group_id):
+        if len(member_ids) > 0:
             group_id = random.randrange(1, 2**64)
+            while db.get_group_name(group_id):
+                group_id = random.randrange(1, 2**64)
 
-        if db.get_group_id(name) or db.get_id(name):
-            self._logger.log(f"Name {name} already in use.", 1)
-            raise GroupNameInUseException(name)
-        self._logger.log(f"Creating group: id = {group_id}, members = {member_ids}", 1)
+            if db.get_group_id(name) or db.get_id(name):
+                self._logger.log(f"Name {name} already in use.", 1)
+                raise GroupNameInUseException(name)
+            self._logger.log(f"Creating group: id = {group_id}, members = {member_ids}", 1)
 
-        db.create_group(name, group_id, self._id, member_ids)
+            db.create_group(name, group_id, self._id, member_ids)
 
-        failure = False
-        def invite_user(user: str):
-            key = db.get_key(user)
-            signature_data = ("CREATE" + name + ":" + hex(group_id) + ":" + ''.join(member_ids) + ":" + user).encode('utf-8')
-            signature = signing.sign(signature_data, self._priv)
-            encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
-            invite_message = self._message_parser.construct_message(
-                user, "CreateGroup",
-                encrypted_group_name, signature, group_id, member_ids
-            )
-            try:
-                self._server.send(invite_message)
-            except ConnectionException:
-                self._logger.log(f"Could not send CreateGroup message to {user}. Connection died.", 1)
-                failure = True
-        for member_id in member_ids:
-            if db.user_known(member_id):
-                invite_user(member_id)
-            else:
-                self._request_key(member_id)
-                await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
-                await_key_thread.start()
-        if failure:
-            self._message_queue.push(("ERROR", "Group creation failed. Group is likely in an unusable state."))
-            self._handle_disconnect()
+            failure = False
+            def invite_user(user: str):
+                key = db.get_key(user)
+                signature_data = ("CREATE" + name + ":" + hex(group_id) + ":" + ''.join(member_ids) + ":" + user).encode('utf-8')
+                signature = signing.sign(signature_data, self._priv)
+                encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
+                invite_message = self._message_parser.construct_message(
+                    user, "CreateGroup",
+                    encrypted_group_name, signature, group_id, member_ids
+                )
+                try:
+                    self._server.send(invite_message)
+                except ConnectionException:
+                    self._logger.log(f"Could not send CreateGroup message to {user}. Connection died.", 1)
+                    failure = True
+            for member_id in member_ids:
+                if db.user_known(member_id):
+                    invite_user(member_id)
+                else:
+                    self._request_key(member_id)
+                    await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
+                    await_key_thread.start()
+            if failure:
+                self._message_queue.push(("ERROR", "Group creation failed. Group is likely in an unusable state."))
+                self._handle_disconnect()
+        else:
+            self._message_queue.push(("ERROR", "Group contains no members"))
 
 
     def run(self, password: str):
