@@ -129,7 +129,6 @@ class Client_DB:
             group_id (int): The groups numeric ID
             owner_id (str): The client ID of the group's owner
             members (list[str]): The client IDs of all the members of the group
-                (can include the owner but they will be added anyway if it does not)
         """
         iv = random.randrange(1, 2**128)
         encrypted_group_name = aes256.encrypt_cbc(group_name.encode('utf-8'), self._encryption_key, iv)
@@ -140,8 +139,6 @@ class Client_DB:
                          (hex(group_id), name_hash, encrypted_group_name, hex(iv), owner_id))
         for member in members:
             self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), member))
-        if owner_id not in members:
-            self._db.execute("INSERT INTO group_members (id, client_id) VALUES (?, ?)", (hex(group_id), owner_id))
         self._db.commit()
 
     def remove_group_member(self, group_id: int, member: str):
@@ -228,7 +225,7 @@ class Client_DB:
             str | None: The client ID or None if the group does not exist
         """
         cursor = self._db.cursor()
-        cursor.execute("SELECT owner_id FROM groups WHERE id=?", (group_id, ))
+        cursor.execute("SELECT owner_id FROM groups WHERE id=?", (hex(group_id), ))
         result = cursor.fetchone()
         if result is None:
             return None

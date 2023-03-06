@@ -640,7 +640,7 @@ class Client:
                 members.remove(self._id)
             except ValueError:
                 pass # sender didn't include us in the member list for whatever reason
-            db.create_group(group_name, group_id, sender, members)
+            db.create_group(group_name, group_id, sender, members + [sender])
             db.close()
             self._logger.log(f"Group {group_id} successfully created.", 3)
             self._message_queue.push(("NEWGROUP", (group_name, )))
@@ -708,7 +708,7 @@ class Client:
                         postfix += 1
                     old_name = db.get_group_name(group_id)
                     db.rename_group(group_id, name_decrypted)
-                    self._logger.log("Renamed group {group_id}", 2)
+                    self._logger.log(f"Renamed group {group_id}", 2)
                     self._message_queue.push(("RENAMEGROUP", (old_name, name_decrypted)))
                     return None
                 return "InvalidSignature", ("RenameGroup", group_id, )
