@@ -494,7 +494,7 @@ class Client:
 
     def quit(self):
         """Close the connection with the server and shutdown the client program."""
-        if not self._running:
+        if self._running:
             self._running = False
             self._logger.log("Shutting down client program", 2)
             try:
