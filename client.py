@@ -465,7 +465,7 @@ class Application:
         self._draw_left_panel_bottom_bar()
         self._running = True
         last_poll = 0
-        while self._running and self._client.running:
+        while self._running:
             if time.time() - last_poll >= 1:
                 last_poll = time.time()
                 while self._client.new:
