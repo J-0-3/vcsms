@@ -670,7 +670,9 @@ class Client:
                 if signing.verify(signature_data, signature, key):
                     if sender == db.get_owner(group_id):
                         self._logger.log(f"Deleting group {group_id} as the owner left.", 3)
+                        group_name = db.get_group_name(group_id)
                         db.delete_group_by_group_id(group_id)
+                        self._message_queue.push(("DELETEGROUP", group_name))
                         return None
                     self._logger.log(f"Removing {sender} from {group_id} as they left.", 4)
                     db.remove_group_member(group_id, sender)

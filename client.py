@@ -189,12 +189,12 @@ class Application:
         self._id = client.id
         self._new_message = {}
         self._running = False
-        self.__focused_user = ""
+        self.__focused_user_name = ""
         self._focused_user_index = 0
         self._panel_sizes = {}
         self._contacts = client.contacts
         if len(self._contacts) > 0:
-            self.__focused_user = self._contacts[0][0]
+            self.__focused_user_name = self._contacts[0][0]
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_RED)
         self._panel_sizes = {
             "main": (curses.LINES - 7, curses.COLS - 27),
@@ -212,19 +212,19 @@ class Application:
         self._stdscr.nodelay(True)
 
     @property
-    def _focused_user(self) -> str:
+    def _focused_user_name(self) -> str:
         """Get the name of the currently focused user.
 
         Setting this automatically resets the scroll position and
         redraws the left panel, main panel, and bottom bar if required.
         """
-        return self.__focused_user
+        return self.__focused_user_name
 
-    @_focused_user.setter
-    def _focused_user(self, user: str):
-        bottom_bar_redraw = user != self.__focused_user
+    @_focused_user_name.setter
+    def _focused_user_name(self, user: str):
+        bottom_bar_redraw = user != self.__focused_user_name
         # bottom bar should be redrawn if a user was previously or currently unfocused
-        self.__focused_user = user
+        self.__focused_user_name = user
         if user:
             self._new_message[user] = False
 
@@ -486,8 +486,18 @@ class Application:
                         self._contacts = self._client.contacts
                         if event == "RENAMEGROUP":
                             old_name, new_name = info
+                            if old_name in self._new_message and self._new_message[old_name]:
+                                self._new_message.pop(old_name)
+                                self._new_message[new_name] = True
                             if self._focused_user == old_name:
                                 self._focused_user = new_name
+
+                        elif event == "DELETEGROUP":
+                            if self._focused_user == info:
+                                if len(self._contacts) > 0:
+                                    self._focused_user = self._contacts[0][0]
+                                else:
+                                    self._focused_user = ""
                         self._draw_left_panel()
                         self._draw_main_panel(True)
             self._handle_input()
