@@ -415,10 +415,10 @@ class Application:
             if new_name:
                 try:
                     self._client.rename_contact(self._focused_user_name, new_name)
+                    self._contacts = self._client.contacts
+                    self._focused_user_name = new_name
                 except ClientException as e:
                     self._flash_error(e.message)
-                self._contacts = self._client.contacts
-                self._focused_user_name = new_name
 
     def _delete_contact(self):
         if self._focused_user_name:
