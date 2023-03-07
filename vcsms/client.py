@@ -194,7 +194,7 @@ class Client:
             if not re.fullmatch('^[0-9a-fA-F]{32}$', nickname):
                 if client_id != self._id:
                     db = self._db_connect()
-                    if db.get_id(nickname):
+                    if db.get_id(nickname) or db.get_group_id(nickname):
                         self._logger.log(f"Nickname {nickname} is already in use", 1)
                         raise NickNameInUseException(nickname)
                     if db.get_nickname(client_id):
@@ -205,7 +205,7 @@ class Client:
                 else:
                     raise ClientException("Cannot add yourself as a contact")
             else:
-                self._logger.log("Nickname {nickname} looks like a client id.", 1)
+                self._logger.log(f"Nickname {nickname} looks like a client id.", 1)
                 raise ClientException("Nickname cannot be a valid client ID")
         else:
             self._logger.log(f"{client_id} does not look like a valid client id.", 1)
