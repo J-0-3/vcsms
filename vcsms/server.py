@@ -24,9 +24,9 @@ INCOMING_MESSAGE_TYPES = {
 OUTGOING_MESSAGE_TYPES = {
     "KeyFound": ([int, int, int], [10, 16, 16]),
     "KeyNotFound": ([int], [10]),
-    "InvalidIV": (),
-    "CiphertextMalformed": (),
-    "MessageMalformed": ()
+    "InvalidIV": ([], []),
+    "CiphertextMalformed": ([], []),
+    "MessageMalformed": ([], [])
 }
 
 
