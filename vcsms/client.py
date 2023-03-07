@@ -191,18 +191,22 @@ class Client:
         """
         client_id = client_id.strip().lower()
         if re.fullmatch('^[0-9a-f]{32}$', client_id):
-            if client_id != self._id:
-                db = self._db_connect()
-                if db.get_id(nickname):
-                    self._logger.log(f"Nickname {nickname} is already in use", 1)
-                    raise NickNameInUseException(nickname)
-                if db.get_nickname(client_id):
-                    self._logger.log(f"User {client_id} already exists", 1)
-                    raise UserAlreadyExistsException()
-                db.set_nickname(client_id, nickname)
-                db.close()
+            if not re.fullmatch('^[0-9a-fA-F]{32}$', nickname):
+                if client_id != self._id:
+                    db = self._db_connect()
+                    if db.get_id(nickname):
+                        self._logger.log(f"Nickname {nickname} is already in use", 1)
+                        raise NickNameInUseException(nickname)
+                    if db.get_nickname(client_id):
+                        self._logger.log(f"User {client_id} already exists", 1)
+                        raise UserAlreadyExistsException()
+                    db.set_nickname(client_id, nickname)
+                    db.close()
+                else:
+                    raise ClientException("Cannot add yourself as a contact")
             else:
-                raise ClientException("Cannot add yourself as a contact")
+                self._logger.log("Nickname {nickname} looks like a client id.", 1)
+                raise ClientException("Nickname cannot be a valid client ID")
         else:
             self._logger.log(f"{client_id} does not look like a valid client id.", 1)
             raise InvalidIDException()
@@ -1082,6 +1086,7 @@ class Client:
             else:
                 if sender_name is None:
                     db.set_nickname(sender, sender)
+                    sender_name = sender
                 db.insert_message(sender, data, False)
             self._message_queue.push(("MESSAGE", (sender_name, group_name, data)))
             db.close()
