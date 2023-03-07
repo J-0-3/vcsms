@@ -1072,7 +1072,7 @@ class Client:
 
             db = self._db_connect()
             group_name = db.get_group_name(group) or ""
-            sender_name = db.get_nickname(sender) or sender
+            sender_name = db.get_nickname(sender)
             if group:
                 if sender in db.get_members_by_id(group):
                     db.insert_group_message(group, data, sender)
@@ -1080,7 +1080,7 @@ class Client:
                     self._logger.log(f"{sender} sent a message to group {group} of which they or I am not a member.", 2)
                     return "NotAllowed", ("MessageData", )
             else:
-                if sender_name == sender:
+                if sender_name is None:
                     db.set_nickname(sender, sender)
                 db.insert_message(sender, data, False)
             self._message_queue.push(("MESSAGE", (sender_name, group_name, data)))
