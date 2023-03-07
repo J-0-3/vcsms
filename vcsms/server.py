@@ -262,8 +262,7 @@ class Server:
         self._logger.log(f"User {client_id} closed the connection", 1)
         self._client_sockets.pop(client_id)
 
-    @staticmethod
-    def _out_thread(client: ImprovedSocket, outbox: Queue, encryption_key: int):
+    def _out_thread(self, client: ImprovedSocket, outbox: Queue, encryption_key: int):
         """A function to be run by a thread which constantly reads messages from
         the outbox queue, encrypts them, and sends them to the given client socket.
 
