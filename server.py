@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import getpass
 import os
 import json
 
@@ -13,6 +14,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--directory", type=str, default="vcsms_server", help="the directory in which to store all the server's files")
     parser.add_argument("-o", "--config-out", type=str, help="a location to output the server's connection file to")
+    parser.add_argument("-P", "--password", type=str, help="the server master key to encrypt the private key at rest")
     parser.add_argument("-i", "--interface", type=str, help="the IP address of the network interface to run on. (Default 127.0.0.1)", default="127.0.0.1")
     parser.add_argument("-p", "--port", type=int, help="the port for the service to listen on. (Default 6000)", default=6000)
     parser.add_argument("-l", "--loglevel", type=int, default=5, help="the verbosity of the server log file")
@@ -25,7 +27,7 @@ if __name__ == "__main__":
     log_path = os.path.join(server_directory, "server.log")
     database_path = os.path.join(server_directory, "server.db")
 
-    private_key_password = input("Enter private key encryption password: ")
+    private_key_password = args.password or getpass.getpass(prompt="Enter private key encryption password: ")
     pk_encryption_key = keys.derive_key(private_key_password)
     try:
         pub = keys.load_key(public_key_path)

@@ -13,6 +13,7 @@ from .improved_socket import ImprovedSocket
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
 from .exceptions.server import IDCollisionException
+from .exceptions.socket import SocketException
 
 INCOMING_MESSAGE_TYPES = {
     "GetKey": ([int, str], [10, 'utf-8']),
@@ -211,45 +212,50 @@ class Server:
         """
         while client.connected:
             if client.new:
-                raw = client.recv()
                 try:
-                    aes_iv, ciphertext = raw.decode().split(':', 1)
-                except ValueError:
-                    self._logger.log(f"Malformed message from {client_id}", 2)
-                    error_msg = self._message_parser.construct_message("0", "CiphertextMalformed")
-                    self._send(client_id, error_msg)
-                    continue
-                try:
-                    aes_iv = int(aes_iv, 16)
-                except ValueError:
-                    self._logger.log(f"Invalid initialization vector {aes_iv}", 2)
-                    error_msg = self._message_parser.construct_message("0", "InvalidIV")
-                    self._send(client_id, error_msg)
-                    continue
-                try:
-                    data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
-                except DecryptionFailureException:
-                    self._logger.log(f"Could not decrypt message from {client_id}", 2)
-                    error_msg = self._message_parser.construct_message("0", "MessageDecryptionFailure")
-                    self._send(client_id, error_msg)
-                    continue
-                try:
-                    recipient, message_type, message_values = self._message_parser.parse_message(data)
-                except MessageParseException as parse_exception:
-                    self._logger.log(str(parse_exception), 2)
-                    error_msg = self._message_parser.construct_message("0", "MessageMalformed") 
-                    self._send(client_id, error_msg)
-                    continue
+                    raw = client.recv()
+                    try:
+                        aes_iv, ciphertext = raw.decode().split(':', 1)
+                    except ValueError:
+                        self._logger.log(f"Malformed message from {client_id}", 2)
+                        error_msg = self._message_parser.construct_message("0", "CiphertextMalformed")
+                        self._send(client_id, error_msg)
+                        continue
+                    try:
+                        aes_iv = int(aes_iv, 16)
+                    except ValueError:
+                        self._logger.log(f"Invalid initialization vector {aes_iv}", 2)
+                        error_msg = self._message_parser.construct_message("0", "InvalidIV")
+                        self._send(client_id, error_msg)
+                        continue
+                    try:
+                        data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
+                    except DecryptionFailureException:
+                        self._logger.log(f"Could not decrypt message from {client_id}", 2)
+                        error_msg = self._message_parser.construct_message("0", "MessageDecryptionFailure")
+                        self._send(client_id, error_msg)
+                        continue
+                    try:
+                        recipient, message_type, message_values = self._message_parser.parse_message(data)
+                    except MessageParseException as parse_exception:
+                        self._logger.log(str(parse_exception), 2)
+                        error_msg = self._message_parser.construct_message("0", "MessageMalformed") 
+                        self._send(client_id, error_msg)
+                        continue
 
-                if recipient == "0":
-                    response = self._message_parser.handle(client_id, message_type, message_values, "0")
-                    if response:
-                        self._send(client_id, response)
-                else:
-                    self._logger.log(f"{message_type} {client_id} -> {recipient}", 4)
-                    to_send = self._message_parser.construct_message(client_id, message_type, *message_values)
-                    self._send(recipient, to_send)
-
+                    if recipient == "0":
+                        response = self._message_parser.handle(client_id, message_type, message_values, "0")
+                        if response:
+                            self._send(client_id, response)
+                    else:
+                        self._logger.log(f"{message_type} {client_id} -> {recipient}", 4)
+                        to_send = self._message_parser.construct_message(client_id, message_type, *message_values)
+                        self._send(recipient, to_send)
+                except SocketException:
+                    self._logger.log(f"Failed to receive data from {client_id}, socket disconnected", 2)
+                    continue
+        
+        client.close()
         db = self._db_connect()
         db.user_logout(client_id)
         db.close()
@@ -273,7 +279,11 @@ class Server:
                 message = outbox.pop()
                 aes_iv = random.randrange(1, 2 ** 128)
                 ciphertext = aes256.encrypt_cbc(message, encryption_key, aes_iv).hex()
-                client.send(hex(aes_iv).encode() + b':' + ciphertext.encode('utf-8'))
+                try:
+                    client.send(hex(aes_iv).encode() + b':' + ciphertext.encode('utf-8'))
+                except SocketException:
+                    self._logger.log("Failed to send data to client, socket disconnected", 2)
+                    continue
 
     # message type handler methods
     def _handler_get_key(self, sender: str, request_index: int, target_id: str) -> tuple[str, tuple]:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import curses
 import argparse
+import getpass
 import json
 import os
 import time
@@ -559,17 +560,23 @@ def run(stdscr: curses.window, client: Client):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--directory", type=str, default="vcsms_client", help="where to store application-generated files")
-    parser.add_argument("-P", "--password", type=str, help="the application master password")
     parser.add_argument("-c", "--config", type=str, help="the server's .vcsms config file (ignores -i, -p and -f)")
     parser.add_argument("-i", "--ip", type=str, help="the server's IP address (must be used in combination with -p and -f)")
     parser.add_argument("-p", "--port", type=str, help="the server's port (must be used in combination with -i and -f)")
     parser.add_argument("-f", "--fingerprint", type=str, help="the server's fingerprint (must be used in combination with -i and -p)")
     args = parser.parse_args()
-    with open(args.config, 'r', encoding='utf-8') as conf:
-        serverconf = json.load(conf)
     logger = Logger(5, os.path.join(args.directory, "log.txt"))
-    vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, logger)
-    password = args.password or input("Enter master password: ")
+    if args.config:
+        with open(args.config, 'r', encoding='utf-8') as conf:
+            serverconf = json.load(conf)
+            vcsms_client = Client(serverconf["ip"], serverconf["port"], serverconf["fingerprint"], args.directory, logger)
+    else:
+        if args.ip and args.port and args.fingerprint:
+            vcsms_client = Client(args.ip, args.port, args.fingerprint, args.directory, logger)
+        else:
+            print("Error: No configuration file is not supplied and the -i, -p and -f flags have not been used.")
+            quit()
+    password = getpass.getpass(prompt="Enter master password: ")
     try:
         vcsms_client.run(password)
     except IncorrectMasterKeyException:
