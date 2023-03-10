@@ -66,8 +66,6 @@ class ImprovedSocket:
             if exc.errno == 106:
                 raise SocketAlreadyConnectedException()
             raise ConnectionFailureException()
-        except ConnectionRefusedError:
-            raise ConnectionFailureException()
 
     def close(self):
         """Close the connection and shutdown the socket."""

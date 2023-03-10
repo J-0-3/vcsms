@@ -124,7 +124,7 @@ class ServerConnection:
         try:
             plaintext = aes256.decrypt_cbc(ciphertext, self._encryption_key, iv)
         except DecryptionFailureException:
-            self._socket.send("CouldNotDecrypt")
+            self._socket.send(b"CouldNotDecrypt")
             self._socket.close()
             raise KeyConfirmationFailureException()
         self._socket.send(plaintext.hex().encode('utf-8'))

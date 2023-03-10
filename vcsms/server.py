@@ -127,7 +127,6 @@ class Server:
         dhke_priv = random.randrange(1, self._dhke_group[1])
         dhke_pub, dhke_sig = signing.gen_signed_dh(dhke_priv, self._priv, self._dhke_group)
         client.send(hex(dhke_pub)[2:].encode() + b":" + dhke_sig)
-
         pubkey_auth_packet = client.recv()
         if pubkey_auth_packet == b"BadSignature":
             self._logger.log(f"Connection failure. Client reported an incorrect signature.", 1)
@@ -149,7 +148,6 @@ class Server:
             client.send(b"BadSignature")
             client.close()
             return
-
         shared_key = dhke.calculate_shared_key(dhke_priv, int(c_dhke_pub, 16), self._dhke_group)
         encryption_key = sha256.hash(utils.i_to_b(shared_key))
         db = self._db_connect()
@@ -168,7 +166,7 @@ class Server:
         client.send(hex(enc_iv)[2:].encode('utf-8') + b':' + encrypted_confirmation.hex().encode('utf-8'))
         client_confirm = client.recv()
         if client_confirm == b"MalformedChallenge":
-            self._logger.log("Connection Failure. Client reported a malformed confirmation packet.")
+            self._logger.log("Connection Failure. Client reported a malformed confirmation packet.", 1)
             client.close()
             return
         if client_confirm == b"CouldNotDecrypt":
