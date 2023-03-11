@@ -8,5 +8,5 @@ for file in os.listdir("tests"):
         test_sets.append(test_module.tests)
 
 for set in test_sets:
-    set.run_all()
+    set.run()
     

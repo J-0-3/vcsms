@@ -1078,7 +1078,7 @@ class Client:
             group_name = db.get_group_name(group) or ""
             sender_name = db.get_nickname(sender)
             if group:
-                if sender in db.get_members_by_id(group):
+                if sender in (members := db.get_members_by_id(group)):
                     db.insert_group_message(group, data, sender)
                 else:
                     self._logger.log(f"{sender} sent a message to group {group} of which they or I am not a member.", 2)

@@ -42,8 +42,6 @@ def invert_sbox(s_box: list) -> list:
             lower = byte % 2**4 
             inverted_s_box[upper][lower] = (row_i << 4) | col_i
     return inverted_s_box
-
-
 inverse_s_box = invert_sbox(s_box)
 
 
@@ -537,7 +535,7 @@ def decipher_round(state: list, round_key: list) -> list:
     return state
 
 
-def encrypt_block(key_schedule: list, block: bytes) -> int:
+def encrypt_block(key_schedule: list, block: bytes) -> bytes:
     """Encrypt a 128 bit message block using 14 AES rounds
 
     Args:
@@ -558,7 +556,7 @@ def encrypt_block(key_schedule: list, block: bytes) -> int:
     return matrix_to_bytes(state)
 
 
-def decrypt_block(key_schedule: list, block: bytes) -> int:
+def decrypt_block(key_schedule: list, block: bytes) -> bytes:
     """Decrypt one 128 bit ciphertext block using 14 AES rounds
 
     Args:
@@ -616,7 +614,7 @@ def unpad(data: bytes) -> bytes:
     num_after = int.from_bytes(data[2:4], 'big')
     if num_before + num_after > len(data):
         raise ValueError("Padding is apparently longer than entire data")
-    return data[num_before + 4:-num_after]
+    return data[num_before + 4:len(data)-num_after]
 
 def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:
     """Encrypt a bytestring using AES in Electronic Code Book mode.

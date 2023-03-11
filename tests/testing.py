@@ -7,13 +7,12 @@ class TestFailure(Exception):
         self.output_target = output_target
         self.actual_output = actual_output
         self.message = red(bold("Test Failed!")) + '\n'
-        self.message += f"\tInput: {bold(truncate(str(in_args), 70))}\n"
+        self.message += f"\tInput: {bold(truncate(str(in_args), 7000))}\n"
         self.message += f"\tExpected Output {success_condition}: {bold(truncate(str(output_target), 70))}\n"
         self.message += f"\tGot Instead: {bold(truncate(str(actual_output), 70))}"
         super().__init__(f"Test failed")
 
 def get_test_function(function: Callable, success_condition: str, *args) -> Callable:
-
     if success_condition == "eq":
         def test(in_args, output_target):
             try:
@@ -69,7 +68,7 @@ class TestSet:
         self.tests = tests
         self.failures = {}
 
-    def run_all(self):
+    def run(self):
         print(bold(underline(f"Starting Test Set: {self.name}")))
         print(bold(f"Running {len(self.tests)} unit tests..."))
         for test in self.tests:
@@ -88,9 +87,7 @@ class TestSet:
             fail_rate = 100 * len(self.failures[test.name]) / len(test.tests)
             pass_rate = 100 - fail_rate
             if pass_rate == 100:
-                print(green("100%!"))
-            elif pass_rate > 50:
-                print(pass_rate)
+                print(green("100%"))
             else:
-                print(red(pass_rate))
+                print(red(str(pass_rate)))
 

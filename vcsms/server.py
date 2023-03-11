@@ -24,6 +24,7 @@ INCOMING_MESSAGE_TYPES = {
 OUTGOING_MESSAGE_TYPES = {
     "KeyFound": ([int, int, int], [10, 16, 16]),
     "KeyNotFound": ([int], [10]),
+    "UnknownMessageType": ([str], ['utf-8']),
     "InvalidIV": ([], []),
     "CiphertextMalformed": ([], []),
     "MessageMalformed": ([], [])
@@ -324,6 +325,17 @@ class Server:
             values (list): The parameters included in the message.
         """
         self._logger.log(f"{sender} sent message of type {message_type}. No action taken.", 3)
+
+    def _handler_unknown(self, sender: str, message_type: str, values: list):
+        """Handler for messages of unknown type.
+
+        Args:
+            sender (str): The client ID which sent the message.
+            message_type (str): The message type they sent.
+            values (list): The parameters included in the message.
+        """
+        self._logger.log(f"{sender} sent message of unknown type {message_type}", 2)
+        return "UnknownMessageType", (message_type, )
 
     def _db_connect(self) -> Server_DB:
         """Get a connection to the server database.

