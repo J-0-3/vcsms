@@ -971,14 +971,12 @@ class Client:
             if not self._await_key(sender, 60, lambda: None):
                 db.close()
                 return None
-
         sender_rsa = db.get_key(sender)
         if not signing.verify_signed_dh(sender_dh_pub, sender_dh_sig, sender_rsa, message_index):
             db.close()
             self._logger.log(
                 f"Invalid Diffie Hellman signature from {sender}", 1)
             return "InvalidSignature", ("NewMessage", message_index, )
-
         db.close()
         dh_priv = random.randrange(1, self._dhke_group[1])
         dh_pub, dh_pub_sig = signing.gen_signed_dh(
@@ -986,7 +984,6 @@ class Client:
         shared_secret = dhke.calculate_shared_key(
             dh_priv, sender_dh_pub, self._dhke_group)
         encryption_key = sha256.hash(i_to_b(shared_secret))
-
         self._messages[message_index] = {
             "client_id": sender,
             "public_key": sender_dh_pub,
@@ -1013,7 +1010,7 @@ class Client:
         if message_index not in self._messages:
             self._logger.log(
                 f"Message acceptance from {sender} for non-existent message {message_index}", 2
-            )
+                )
             return "NoSuchIndex", (message_index, )
         if sender == self._messages[message_index]["client_id"]:
             db = self._db_connect()

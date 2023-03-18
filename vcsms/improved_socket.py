@@ -97,7 +97,7 @@ class ImprovedSocket:
             try:
                 with self._send_lock:
                     self._sock.sendall(data + b'\xff')
-            except (OSError, BrokenPipeError) as exc:
+            except (OSError, BrokenPipeError):
                 self.close()
                 raise DisconnectedException()
         else:

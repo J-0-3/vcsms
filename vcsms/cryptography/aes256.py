@@ -616,61 +616,6 @@ def unpad(data: bytes) -> bytes:
         raise ValueError("Padding is apparently longer than entire data")
     return data[num_before + 4:len(data)-num_after]
 
-def encrypt_ecb(data: bytes, key: int, raw: bool = False) -> bytes:
-    """Encrypt a bytestring using AES in Electronic Code Book mode.
-    This means that the data is split into blocks and each block is
-    encrypted independently using the same key.
-    This is *insecure* as if data is repeated throughout the plaintext then there
-    will be repeated blocks within the ciphertext allowing for cryptanalysis.
-
-    Args:
-        data (bytes): The plaintext bytestring to encrypt
-        key (int): The 256 bit encryption key
-        raw (bool): Do not pad or add any additional information to the plaintext.
-            You definitely do not want to do this.
-
-    Returns:
-        bytes: The encrypted ciphertext bytestring
-    """
-    if not raw:
-        data_padded = add_pkcs7(pad(data))
-    else:
-        data_padded = add_pkcs7(data)
-    message_blocks = split_blocks(data_padded)
-    key_schedule = expand_key(key)
-    ciphertext_blocks = [encrypt_block(key_schedule, block) for block in message_blocks]
-    ciphertext = b''.join(ciphertext_blocks)
-    return ciphertext
-
-
-def decrypt_ecb(ciphertext: bytes, key: int, raw: bool = False) -> bytes:
-    """Decrypt a bytestring using AES in Electronic Code Book mode.
-
-    Args:
-        ciphertext (bytes): The ciphertext bytestring to decrypt.
-        key (int): The 256 bit encryption key.
-        raw (bool): The data did not have any formatting or padding applied
-            prior to encryption. (Default: False)
-
-    Returns:
-        bytes: The decrypted plaintext bytestring
-    """
-    ciphertext_blocks = split_blocks(ciphertext)
-    key_schedule = expand_key(key)
-    message_blocks = [decrypt_block(key_schedule, block) for block in ciphertext_blocks]
-    message = b''.join(message_blocks)
-    try:
-        message = remove_pkcs7(message)
-    except ValueError:
-        raise DecryptionFailureException(key)
-    if not raw:
-        try:
-            message = unpad(message)
-        except:
-            raise DecryptionFailureException(key)
-    return message
-
-
 def encrypt_cbc(data: bytes, key: int, iv: int = 0, test_mode: bool = False) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
     This means that the output of the encryption of each plaintext block
@@ -697,7 +642,7 @@ def encrypt_cbc(data: bytes, key: int, iv: int = 0, test_mode: bool = False) -> 
         data = add_pkcs7(data)
     else:
         if len(data) % 16 != 0:
-            raise CryptographyException("PKCS7 padding was not added and the plaintext is not a multiple of 16 bytes in length")
+            raise CryptographyException("No PKCS#7 and plaintext is not a multiple of 16 bytes")
 
     message_blocks = split_blocks(data)  # split message into blocks
     key_schedule = expand_key(key)
@@ -736,7 +681,6 @@ def decrypt_cbc(ciphertext: bytes, key: int, iv: int, test_mode: bool = False) -
             raise DecryptionFailureException(key)
         ciphertext_hmac = ciphertext[-32:]
         ciphertext = ciphertext[:-32]
-
     try:
         ciphertext_blocks = split_blocks(ciphertext)
     except ValueError:
@@ -753,7 +697,6 @@ def decrypt_cbc(ciphertext: bytes, key: int, iv: int, test_mode: bool = False) -
         message_blocks.append(xor_b(xored_block, prev_output))
 
     plaintext = b''.join(message_blocks)
-
     if not test_mode:
         if not hmac.verify(ciphertext_hmac, ciphertext, iv, key):
             raise DecryptionFailureException(key)

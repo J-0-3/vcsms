@@ -1,9 +1,7 @@
 import random
-from math import log2
-from typing import Union
 from . import primes
 from .utils import i_to_b
-from .exceptions import CryptographyException, DataTooLong, DecryptionFailureException
+from .exceptions import DataTooLong, DecryptionFailureException
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b 
@@ -34,7 +32,6 @@ def gcd_extended_euclid(a: int, b: int) -> tuple:
         quotient = b // remainder
         remainder_copy = remainder
         remainder = b % remainder
-        # print(f"{b} = {quotient} * {remainder_copy} + {remainder}")
         b = remainder_copy
         s1 = s2
         s2 = s3

@@ -51,33 +51,32 @@ def hash(message: bytes) -> int:
          0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
          0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
 
+    def ms_sigma_zero(x: int) -> int:
+        return circular_right_shift(x, 7) ^ circular_right_shift(x, 18) ^ (x >> 3)
+
+    def ms_sigma_one(x: int) -> int:
+        return circular_right_shift(x, 17) ^ circular_right_shift(x, 19) ^ (x >> 10)
+
+    def sigma_zero(x: int) -> int:
+        return circular_right_shift(x, 2) ^ circular_right_shift(x, 13) ^ circular_right_shift(x, 22)
+
+    def sigma_one(x: int) -> int:
+        return circular_right_shift(x, 6) ^ circular_right_shift(x, 11) ^ circular_right_shift(x, 25)
+
+    def choice(x: int, y: int, z: int) -> int:
+        return (x & y) ^ (~x & z)
+
+    def majority(x: int, y: int, z: int) -> int:
+        return (x & y) ^ (x & z) ^ (y & z)
+
     for c in chunks:
-        def ms_sigma_zero(x: int) -> int:
-            return circular_right_shift(x, 7) ^ circular_right_shift(x, 18) ^ (x >> 3)
-
-        def ms_sigma_one(x: int) -> int:
-            return circular_right_shift(x, 17) ^ circular_right_shift(x, 19) ^ (x >> 10)
-
         words = []
         for i in range(0, len(c), 4):
             words.append(int.from_bytes(c[i:i + 4], byteorder='big'))
         for i in range(16, 64):
             words.append((ms_sigma_one(words[i - 2]) + words[i - 7] + ms_sigma_zero(words[i - 15]) + words[i - 16]) % 2 ** 32)
-
+        
         a, b, c, d, e, f, g, h = H
-
-        def sigma_zero(x: int) -> int:
-            return circular_right_shift(x, 2) ^ circular_right_shift(x, 13) ^ circular_right_shift(x, 22)
-
-        def sigma_one(x: int) -> int:
-            return circular_right_shift(x, 6) ^ circular_right_shift(x, 11) ^ circular_right_shift(x, 25)
-
-        def choice(x: int, y: int, z: int) -> int:
-            return (x & y) ^ (~x & z)
-
-        def majority(x: int, y: int, z: int) -> int:
-            return (x & y) ^ (x & z) ^ (y & z)
-
         for i in range(64):
             t_word_1 = (h + sigma_one(e) + choice(e, f, g) + K[i] + words[i]) % 2 ** 32
             t_word_2 = (sigma_zero(a) + majority(a, b, c)) % 2 ** 32
