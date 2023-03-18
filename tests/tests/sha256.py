@@ -38,4 +38,4 @@ random_4mb_value_test = Test(
 tests = TestSet("SHA256 Tests", single_byte_test, random_32_byte_test, random_length_value_test, random_4mb_value_test)
 
 if __name__ == "__main__":
-    tests.run_all()
+    tests.run()

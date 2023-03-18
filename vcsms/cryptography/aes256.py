@@ -3,7 +3,7 @@ import random
 
 from . import hmac
 from .utils import get_msb, xor_b
-from .exceptions import DecryptionFailureException
+from .exceptions import CryptographyException, DecryptionFailureException
 
 s_box = [[0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76],
          [0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0],
@@ -671,7 +671,7 @@ def decrypt_ecb(ciphertext: bytes, key: int, raw: bool = False) -> bytes:
     return message
 
 
-def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False, add_hmac: bool = True) -> bytes:
+def encrypt_cbc(data: bytes, key: int, iv: int = 0, test_mode: bool = False) -> bytes:
     """Encrypt a bytestring using AES in Cipher Block Chaining mode.
     This means that the output of the encryption of each plaintext block
     is XORed with the next plaintext block before it is encrypted which
@@ -684,19 +684,22 @@ def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False, add_hmac:
         key (int): The 256 bit encryption key
         iv (int): The 128 bit initialisation vector to XOR with the first block. 
             It is highly recommended this is provided. (Default 0)
-        raw (bool): Do not add any additional information to the plaintext besides PKCS#7.
-            You definitely do not want to do this. (Default False)
-        add_hmac (bool): Whether to append an HMAC to the ciphertext (encrypt-then-hmac)
-            (Default True)
+        test_mode (bool): Do not add random padding,
+            assume plaintext is of length 16n bytes and do not add PKCS#7 padding,
+            do not append an HMAC to the ciphertext.
+            This should be set for testing purposes ONLY as it is INSECURE.
 
     Returns:
         bytes: The encrypted ciphertext bytestring
     """
-    if not raw:
-        data_padded = add_pkcs7(pad(data))
+    if not test_mode:
+        data = pad(data)
+        data = add_pkcs7(data)
     else:
-        data_padded = add_pkcs7(data)
-    message_blocks = split_blocks(data_padded)  # split message into blocks
+        if len(data) % 16 != 0:
+            raise CryptographyException("PKCS7 padding was not added and the plaintext is not a multiple of 16 bytes in length")
+
+    message_blocks = split_blocks(data)  # split message into blocks
     key_schedule = expand_key(key)
     ciphertext_blocks = []
     prev_output = iv.to_bytes(16, 'big')
@@ -707,34 +710,37 @@ def encrypt_cbc(data: bytes, key: int, iv: int = 0, raw: bool = False, add_hmac:
         ciphertext_blocks.append(ciphertext_block)
 
     ciphertext = b''.join(ciphertext_blocks)
-    if add_hmac:
+    if not test_mode:
         ciphertext_hmac = hmac.calculate(ciphertext, iv, key)
         ciphertext += ciphertext_hmac
     return ciphertext
 
 
-def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False, added_hmac: bool = True) -> bytes:
+def decrypt_cbc(ciphertext: bytes, key: int, iv: int, test_mode: bool = False) -> bytes:
     """Decrypt a bytestring using AES in Cipher Block Chaining mode.
 
     Args:
         ciphertext (bytes): The encrypted ciphertext bytestring
         key (int): The 256 bit encryption key
         iv (int): The 128 bit initialisation vector used when the data was encrypted.
-        raw (bool): The data did not have any padding or formatting applied before encryption.
-            (Default: False).
-        added_hmac (bool): Whether an HMAC was appended to the ciphertext (Default True)
+        test_mode (bool): Assume no random padding has been added,
+            assume no PKCS#7 padding has been added,
+            assume no HMAC has been added.
+            This should be used when testing the algorithm ONLY.
 
     Returns:
         bytes: The decrypted plaintext bytestring
     """
-    if added_hmac:
+    if not test_mode:
         if len(ciphertext) < 32:
             raise DecryptionFailureException(key)
         ciphertext_hmac = ciphertext[-32:]
         ciphertext = ciphertext[:-32]
-        if not hmac.verify(ciphertext_hmac, ciphertext, iv, key):
-            raise DecryptionFailureException(key)
-    ciphertext_blocks = split_blocks(ciphertext)
+
+    try:
+        ciphertext_blocks = split_blocks(ciphertext)
+    except ValueError:
+        raise DecryptionFailureException(key)
     key_schedule = expand_key(key)
     message_blocks = []
     for i, block in enumerate(ciphertext_blocks):
@@ -748,11 +754,13 @@ def decrypt_cbc(ciphertext: bytes, key: int, iv: int, raw: bool = False, added_h
 
     plaintext = b''.join(message_blocks)
 
-    try:
-        plaintext = remove_pkcs7(plaintext)
-    except ValueError:
-        raise DecryptionFailureException(key)
-    if not raw:
+    if not test_mode:
+        if not hmac.verify(ciphertext_hmac, ciphertext, iv, key):
+            raise DecryptionFailureException(key)
+        try:
+            plaintext = remove_pkcs7(plaintext)
+        except ValueError:
+            raise DecryptionFailureException(key)
         try:
             plaintext = unpad(plaintext)
         except:

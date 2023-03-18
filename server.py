@@ -8,7 +8,7 @@ from vcsms.server import Server
 from vcsms.logger import Logger
 from vcsms import keys
 from vcsms.cryptography import sha256
-from vcsms.cryptography.exceptions import DecryptionFailureException
+from vcsms.cryptography.exceptions import CryptographyException, DecryptionFailureException
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -34,7 +34,7 @@ if __name__ == "__main__":
         priv = keys.load_key(private_key_path, pk_encryption_key)
     except FileNotFoundError:
         pub, priv = keys.generate_keys(public_key_path, private_key_path, pk_encryption_key)
-    except DecryptionFailureException:
+    except CryptographyException:
         print("Private key password incorrect. Try again.")
         quit()
 

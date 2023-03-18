@@ -8,7 +8,7 @@ from . import signing
 from .improved_socket import ImprovedSocket
 from .logger import Logger
 from .cryptography import dhke, sha256, utils, aes256
-from .cryptography.exceptions import DecryptionFailureException
+from .cryptography.exceptions import CryptographyException, DecryptionFailureException
 from .exceptions.server_connection import *
 from .exceptions.socket import SocketException
 
@@ -168,18 +168,22 @@ class ServerConnection:
                     continue
                 try:
                     iv, data = data.split(b':')
+                    data = bytes.fromhex(data.decode('utf-8'))
                 except ValueError:
                     self._logger.log("Server sent a malformed packet", 2)
+                    self.send(b"0:CiphertextMalformed:")
                     continue
                 try:
                     iv = int(iv, 16)
                 except ValueError:
                     self._logger.log("Server sent an invalid initialisation vector", 2)
+                    self.send(b"0:InvalidIV:")
                     continue
                 try:
-                    message = aes256.decrypt_cbc(utils.i_to_b(int(data, 16)), self._encryption_key, iv)
-                except DecryptionFailureException:
+                    message = aes256.decrypt_cbc(data, self._encryption_key, iv)
+                except CryptographyException:
                     self._logger.log("Failed to decrypt message from server", 2)
+                    self.send(b"0:MessageDecryptionFailure:")
                     continue
                 self._in_queue.push(message)
 
@@ -195,7 +199,7 @@ class ServerConnection:
                     try:
                         self._socket.send(hex(iv)[2:].encode() + b':' + encrypted.hex().encode())
                     except SocketException as exc:
-                        self._logger.log(f"Connection to server died: {exc.message}")
+                        self._logger.log(f"Connection to server died: {exc.message}", 1)
                         continue
 
     def close(self):
@@ -220,7 +224,7 @@ class ServerConnection:
         if self._socket.connected:
             self._out_queue.push(data)
         else:
-            raise NetworkError("Not connected.")
+            raise NetworkError(Exception("Not connected."))
 
 
     def recv(self) -> bytes:
@@ -232,7 +236,7 @@ class ServerConnection:
         if self._socket.connected:
             return self._in_queue.pop()
         else:
-            raise NetworkError("Not connected.")
+            raise NetworkError(Exception("Not connected."))
 
     @property
     def new(self) -> bool:

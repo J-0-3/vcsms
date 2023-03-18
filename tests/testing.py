@@ -2,7 +2,7 @@ from text_formatting import red, green, bold, italic, truncate, underline
 from typing import Callable
 
 class TestFailure(Exception):
-    def __init__(self, in_args: tuple, success_condition: str, output_target: any, actual_output: any):
+    def __init__(self, in_args: tuple, success_condition: str, output_target, actual_output):
         self.in_args = in_args
         self.output_target = output_target
         self.actual_output = actual_output
@@ -70,10 +70,10 @@ class TestSet:
 
     def run(self):
         print(bold(underline(f"Starting Test Set: {self.name}")))
-        print(bold(f"Running {len(self.tests)} unit tests..."))
+        print(bold(f"Running {len(self.tests)} tests..."))
         for test in self.tests:
             self.failures[test.name] = []
-            print(f"Running unit test {bold(test.name)}...")
+            print(f"Running test {bold(test.name)}...")
             test.run()
             if test.failed_tests:
                 print(red("One or more test cases failed..."))
@@ -89,5 +89,5 @@ class TestSet:
             if pass_rate == 100:
                 print(green("100%"))
             else:
-                print(red(str(pass_rate)))
+                print(red(f'{pass_rate}%'))
 

@@ -12,7 +12,7 @@ from typing import Callable
 from .queue import Queue
 from .cryptography import dhke, sha256, aes256, rsa
 from .cryptography.utils import i_to_b
-from .cryptography.exceptions import DecryptionFailureException
+from .cryptography.exceptions import CryptographyException
 from .server_connection import ServerConnection
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
@@ -101,7 +101,11 @@ OUTGOING_MESSAGE_TYPES = {
     # group id
     "NoSuchGroup": ([int], [10]),
     "GroupNameDecryptionFailure": ([int], 10),
-    "Quit": ([], [])
+    "Quit": ([], []),
+    "CiphertextMalformed": ([], []),
+    "MessageDecryptionFailure": ([], []),
+    "InvalidIV": ([], []),
+    "MessageMalformed": ([], [])
 }
 
 class Client:
@@ -239,7 +243,12 @@ class Client:
                         self._logger.log(f"Could not inform {member} of group rename. Public key timeout.", 2)
                         continue
                 key = db.get_key(member)
-                encrypted_group_name = rsa.encrypt(new_name.encode('utf-8'), *key)
+                try:
+                    encrypted_group_name = rsa.encrypt(new_name.encode('utf-8'), *key)
+                except CryptographyException:
+                    self._logger.log(f"Message name too long to rename", 2)
+                    self._message_queue.push(("ERROR", "New group name too long"))
+                    return
                 message = self._message_parser.construct_message(member, "RenameGroup", gid, encrypted_group_name, signature)
                 try:
                     self._server.send(message)
@@ -402,20 +411,24 @@ class Client:
             group_id = random.randrange(1, 2**64)
             while db.get_group_name(group_id):
                 group_id = random.randrange(1, 2**64)
-
             if db.get_group_id(name) or db.get_id(name):
                 self._logger.log(f"Name {name} already in use.", 1)
                 raise GroupNameInUseException(name)
             self._logger.log(f"Creating group: id = {group_id}, members = {member_ids}", 1)
-
             db.create_group(name, group_id, self._id, member_ids)
-
             failure = False
             def invite_user(user: str):
+                nonlocal failure
                 key = db.get_key(user)
                 signature_data = ("CREATE" + name + ":" + hex(group_id) + ":" + ''.join(member_ids) + ":" + user).encode('utf-8')
                 signature = signing.sign(signature_data, self._priv)
-                encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
+                try:
+                    encrypted_group_name = rsa.encrypt(name.encode('utf-8'), *key)
+                except CryptographyException:
+                    self._logger.log(f"Group name too long", 2)
+                    self._message_queue.push(("ERROR", "Group name is too long"))
+                    failure = True
+                    return
                 invite_message = self._message_parser.construct_message(
                     user, "CreateGroup",
                     encrypted_group_name, signature, group_id, member_ids
@@ -424,7 +437,9 @@ class Client:
                     self._server.send(invite_message)
                 except ConnectionException:
                     self._logger.log(f"Could not send CreateGroup message to {user}. Connection died.", 1)
+                    self._message_queue.push(("ERROR", "Connection died while creating group. Group is likely in an unusable state."))
                     failure = True
+                    return
             for member_id in member_ids:
                 if db.user_known(member_id):
                     invite_user(member_id)
@@ -432,9 +447,9 @@ class Client:
                     self._request_key(member_id)
                     await_key_thread = threading.Thread(target=self._await_key, args=(member_id, 60, invite_user, member_id))
                     await_key_thread.start()
-            if failure:
-                self._message_queue.push(("ERROR", "Group creation failed. Group is likely in an unusable state."))
-                self._handle_disconnect()
+                if failure:
+                    self._handle_disconnect()
+                    break
         else:
             self._message_queue.push(("ERROR", "Group contains no members"))
 
@@ -602,7 +617,7 @@ class Client:
         try:
             if plaintext == aes256.decrypt_cbc(ciphertext, self._local_encryption_key, aes_iv):
                 return True
-        except DecryptionFailureException:
+        except CryptographyException:
             return False
         return False
 
@@ -636,6 +651,8 @@ class Client:
                 data)
         except MessageParseException as parse_exception:
             self._logger.log(str(parse_exception), 1)
+            response = self._message_parser.construct_message("0", "MessageMalformed")
+            self._server.send(response)
             return
 
         response = self._message_parser.handle(
@@ -673,7 +690,7 @@ class Client:
         """
         try:
             group_name = rsa.decrypt(encrypted_group_name, self._priv[0], self._priv[1])
-        except DecryptionFailureException:
+        except CryptographyException:
             self._logger.log(f"Unable to decrypt group name in creation request from {sender}.", 2)
             return "GroupNameDecryptionFailure", (group_id, )
         group_name = group_name.decode('utf-8')
@@ -755,7 +772,7 @@ class Client:
             if sender in members:
                 try:
                     name_decrypted = rsa.decrypt(new_name, *self._priv).decode('utf-8')
-                except DecryptionFailureException:
+                except CryptographyException:
                     return "GroupNameDecryptionFailure", (group_id, )
                 signature_data = f"RENAME{name_decrypted}{group_id}{self._id}".encode('utf-8')
                 if not db.user_known(sender):
@@ -1059,7 +1076,7 @@ class Client:
             encryption_key = self._messages[message_index]["encryption_key"]
             try:
                 plaintext = aes256.decrypt_cbc(ciphertext, encryption_key, aes_iv)
-            except DecryptionFailureException:
+            except CryptographyException:
                 self._logger.log(f"Failed to decrypt message from {sender}", 1)
                 return "MessageDataDecryptionFailure", (message_index, )
             try:

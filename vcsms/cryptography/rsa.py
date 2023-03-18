@@ -1,8 +1,9 @@
 import random
+from math import log2
 from typing import Union
 from . import primes
 from .utils import i_to_b
-from .exceptions import DecryptionFailureException
+from .exceptions import CryptographyException, DataTooLong, DecryptionFailureException
 
 def gcd_extended_euclid(a: int, b: int) -> tuple:
     """Recursively calculate the GCD of two integers a and b 
@@ -84,6 +85,8 @@ def encrypt(plaintext: bytes, exponent: int, modulus: int) -> bytes:
         int: The encrypted ciphertext
     """
 
+    if len(plaintext) * 8 > modulus.bit_length():
+        raise DataTooLong(plaintext)
     plaintext_as_int = int.from_bytes(b'RSA' + plaintext, 'big')
     return i_to_b(pow(plaintext_as_int, exponent, modulus))
 
@@ -129,8 +132,9 @@ def gen_keypair(length: int = 2048):
 
         pub, priv = calculate_keys(p, q)
         try:
-            decrypt(encrypt(b'test123abc', *pub), *priv)
-            decrypt(encrypt(b'cba321tset', *priv), *pub)
+            if (decrypt(encrypt(b'test123abc', *pub), *priv) == b'test123abc' and
+                decrypt(encrypt(b'cba321tset', *priv), *pub) == b'cba321tset'):
+                return pub, priv
+            continue
         except DecryptionFailureException:
             continue
-        return pub, priv

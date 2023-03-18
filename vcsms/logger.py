@@ -4,7 +4,7 @@ import time
 
 class Logger:
     """A simple logger class for use in VCSMS."""
-    def __init__(self, loglevel: int, logpath: str, vcsms_version: float = 0):
+    def __init__(self, loglevel: int, logpath: str):
         """Initialise an instance of the Logger class.
 
         Args:

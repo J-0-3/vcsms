@@ -8,7 +8,7 @@ from .queue import Queue
 from .server_db import Server_DB
 from .logger import Logger
 from .cryptography import dhke, sha256, aes256, utils
-from .cryptography.exceptions import DecryptionFailureException
+from .cryptography.exceptions import CryptographyException, DecryptionFailureException
 from .improved_socket import ImprovedSocket
 from .message_parser import MessageParser
 from .exceptions.message_parser import MessageParseException
@@ -18,7 +18,11 @@ from .exceptions.socket import SocketException
 INCOMING_MESSAGE_TYPES = {
     "GetKey": ([int, str], [10, 'utf-8']),
     "Quit": ([], []),
-    "NoSuchKeyRequest": ([int], [10])
+    "NoSuchKeyRequest": ([int], [10]),
+    "MessageMalformed": ([], []),
+    "CiphertextMalformed": ([], []),
+    "InvalidIV": ([], []),
+    "MessageDecryptionFailure": ([], [])
 }
 
 OUTGOING_MESSAGE_TYPES = {
@@ -27,7 +31,8 @@ OUTGOING_MESSAGE_TYPES = {
     "UnknownMessageType": ([str], ['utf-8']),
     "InvalidIV": ([], []),
     "CiphertextMalformed": ([], []),
-    "MessageMalformed": ([], [])
+    "MessageMalformed": ([], []),
+    "MessageDecryptionFailure": ([], [])
 }
 
 
@@ -229,7 +234,7 @@ class Server:
                         continue
                     try:
                         data = aes256.decrypt_cbc(bytes.fromhex(ciphertext), encryption_key, aes_iv)
-                    except DecryptionFailureException:
+                    except CryptographyException:
                         self._logger.log(f"Could not decrypt message from {client_id}", 2)
                         error_msg = self._message_parser.construct_message("0", "MessageDecryptionFailure")
                         self._send(client_id, error_msg)
